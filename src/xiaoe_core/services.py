@@ -10,6 +10,39 @@ from .database import Database
 from .models import AddCourseResult, Course, Lesson, PipelineStatus
 
 
+def parse_positions(text: str) -> Optional[set]:
+    """Parse a position pattern like ``"88-93,1,5,10"`` into a set of integers.
+
+    Returns ``None`` when *text* is empty or equals ``"all"`` (meaning
+    "select every lesson").  Raises ``ValueError`` for malformed input.
+    """
+    cleaned = text.strip()
+    if not cleaned or cleaned.lower() == "all":
+        return None
+    result: set = set()
+    for part in cleaned.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                start_str, end_str = part.split("-", 1)
+                start, end = int(start_str.strip()), int(end_str.strip())
+                if start > end:
+                    raise ValueError("Position range start must be <= end: {}".format(part))
+                result.update(range(start, end + 1))
+            except ValueError as exc:
+                if "Position range" in str(exc):
+                    raise
+                raise ValueError("Invalid position range: {}".format(part)) from exc
+        else:
+            try:
+                result.add(int(part))
+            except ValueError as exc:
+                raise ValueError("Invalid position: {}".format(part)) from exc
+    return result if result else None
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -190,12 +223,17 @@ class LessonService:
         course_id: str,
         lesson_id: Optional[str] = None,
         limit: Optional[int] = None,
+        positions: Optional[set] = None,
     ) -> List[Lesson]:
-        parameters = [course_id]
+        parameters: list = [course_id]
         query = "SELECT * FROM lessons WHERE course_id = ?"
         if lesson_id:
             query += " AND id = ?"
             parameters.append(lesson_id)
+        if positions is not None:
+            placeholders = ",".join("?" for _ in positions)
+            query += " AND position IN ({})".format(placeholders)
+            parameters.extend(sorted(positions))
         query += " ORDER BY position, id"
         if limit is not None:
             if limit < 1:

@@ -66,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     download_parser.add_argument("course_id")
     download_parser.add_argument("--lesson", dest="lesson_id")
     download_parser.add_argument("--limit", type=int)
+    download_parser.add_argument("--positions", help="Lesson positions: all, 88, 88-93, 1,5,10 or 88-93,1,5")
     download_parser.add_argument("--json", action="store_true", dest="as_json")
 
     transcribe_parser = subcommands.add_parser("transcribe", help="Transcribe downloaded lesson audio")
@@ -492,6 +493,11 @@ def run(arguments: argparse.Namespace) -> int:
         return 0
 
     if arguments.command == "download":
+        from xiaoe_core.services import parse_positions
+
+        position_set = None
+        if arguments.positions:
+            position_set = parse_positions(arguments.positions)
         lessons = LessonService(service.database)
         download_service = DownloadService(
             paths=paths,
@@ -505,6 +511,7 @@ def run(arguments: argparse.Namespace) -> int:
             arguments.course_id,
             lesson_id=arguments.lesson_id,
             limit=arguments.limit,
+            positions=position_set,
         )
         if arguments.as_json:
             emit(result.to_dict(), True)

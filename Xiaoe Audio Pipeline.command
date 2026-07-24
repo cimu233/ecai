@@ -138,7 +138,20 @@ MENU
           read -r download_choice
           if [[ "$download_choice" = "y" || "$download_choice" = "Y" ]]; then
             echo ""
-            run_xiaoe download "$course_id"
+            echo "下载范围（默认全部）："
+            echo "  all          — 全部下载"
+            echo "  88           — 仅第 88 节"
+            echo "  88-93        — 第 88 至 93 节"
+            echo "  1,5,10       — 第 1、5、10 节"
+            echo "  88-93,1,5   — 混合"
+            printf "请输入："
+            read -r positions
+            echo ""
+            if [[ -z "$positions" || "$positions" = "all" ]]; then
+              run_xiaoe download "$course_id"
+            else
+              run_xiaoe download "$course_id" --positions "$positions"
+            fi
           fi
         fi
       fi
@@ -147,7 +160,21 @@ MENU
     9)
       course_id="$(select_course)"
       if [[ -n "$course_id" ]]; then
-        run_xiaoe download "$course_id"
+        echo ""
+        echo "下载范围（默认全部）："
+        echo "  all / 回车   — 全部下载"
+        echo "  88           — 仅第 88 节"
+        echo "  88-93        — 第 88 至 93 节"
+        echo "  1,5,10       — 第 1、5、10 节"
+        echo "  88-93,1,5   — 混合"
+        printf "请输入："
+        read -r positions
+        echo ""
+        if [[ -z "$positions" || "$positions" = "all" ]]; then
+          run_xiaoe download "$course_id"
+        else
+          run_xiaoe download "$course_id" --positions "$positions"
+        fi
       fi
       pause_screen
       ;;
