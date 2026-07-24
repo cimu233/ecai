@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.local-asr-venv/
+build/
+dist/
+*.egg-info/
+.env
+.xiaoe-data/
+data/
+courses/
+downloads/
+transcripts/
+browser-profile/
+xiaoe-login.json

@@ -1,0 +1,100 @@
+import contextlib
+import io
+import json
+import tempfile
+import unittest
+import wave
+from pathlib import Path
+
+from test_downloader import LocalMediaServer
+from xiaoe_cli.main import main
+from xiaoe_core.config import AppPaths
+from xiaoe_core.database import Database
+from xiaoe_core.download_service import DownloadService
+from xiaoe_core.downloader import AudioDownloader, ffmpeg_executable
+from xiaoe_core.media import MediaSelector, StoredUrlResolver
+from xiaoe_core.services import CourseService, LessonService
+
+
+class DownloadServiceTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.media_dir = self.root / "media"
+        self.media_dir.mkdir()
+        self.audio_path = self.media_dir / "lesson.wav"
+        with wave.open(str(self.audio_path), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(16000)
+            handle.writeframes(b"\x00\x00" * 16000)
+        self.server = LocalMediaServer(self.media_dir, require_auth=False)
+        self.server.start()
+
+        self.paths = AppPaths.resolve(str(self.root / "data"))
+        self.paths.create()
+        database = Database(self.paths.database_file)
+        self.courses = CourseService(database)
+        self.lessons = LessonService(database)
+        self.course = self.courses.add_course("https://school.example.com/course/1", "Course One").course
+        self.lesson = self.lessons.upsert(
+            course_id=self.course.id,
+            position=1,
+            title="Lesson One",
+            source_url=self.server.base_url + "/lesson.wav",
+        )
+        self.service = DownloadService(
+            paths=self.paths,
+            courses=self.courses,
+            lessons=self.lessons,
+            resolver=StoredUrlResolver(),
+            selector=MediaSelector(),
+            downloader=AudioDownloader(ffmpeg=ffmpeg_executable()),
+        )
+
+    def tearDown(self) -> None:
+        self.server.stop()
+        self.temp_dir.cleanup()
+
+    def test_download_records_artifact_and_second_run_skips(self) -> None:
+        first = self.service.download_course(self.course.id)
+        second = self.service.download_course(self.course.id)
+
+        self.assertEqual(1, first.succeeded)
+        self.assertEqual(0, first.failed)
+        self.assertEqual(1, second.skipped)
+        lesson = self.lessons.get(self.lesson.id)
+        self.assertIsNotNone(lesson)
+        self.assertEqual("audio_ready", lesson.status)
+        self.assertEqual(1, lesson.attempt_count)
+
+        artifact = self.lessons.audio_artifact(self.lesson.id)
+        self.assertIsNotNone(artifact)
+        self.assertTrue(Path(artifact["file_path"]).is_file())
+        metadata = Path(artifact["file_path"]).with_name("download.json").read_text(encoding="utf-8")
+        self.assertIn('"source_host": "127.0.0.1:', metadata)
+        self.assertNotIn("lesson.wav", metadata)
+        self.assertNotIn("Cookie", metadata)
+
+    def test_cli_download_outputs_frontend_ready_json(self) -> None:
+        output = io.StringIO()
+        errors = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            exit_code = main(
+                [
+                    "--data-dir",
+                    str(self.paths.data_dir),
+                    "download",
+                    self.course.id,
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(0, exit_code, errors.getvalue())
+        payload = json.loads(output.getvalue())
+        self.assertEqual(1, payload["succeeded"])
+        self.assertEqual("audio_ready", payload["items"][0]["status"])
+
+
+if __name__ == "__main__":
+    unittest.main()
