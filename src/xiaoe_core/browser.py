@@ -2,8 +2,10 @@
 
 import json
 import os
+import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,8 +18,74 @@ except ImportError:  # pragma: no cover - converted to a clear runtime error bel
     websocket = None
 
 
-CHROME_MAC_PATH = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-EDGE_MAC_PATH = Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")
+def _find_chrome() -> Path:
+    """Return the best-guess path to a local Chrome / Chromium executable."""
+    env = os.environ.get("XIAOE_CHROME_PATH")
+    if env:
+        candidate = Path(env)
+        if candidate.is_file():
+            return candidate
+
+    if sys.platform == "darwin":
+        candidates = [
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        ]
+    elif sys.platform == "win32":
+        candidates = [
+            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Google\\Chrome\\Application\\chrome.exe"),
+            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "Google\\Chrome\\Application\\chrome.exe"),
+            Path(os.environ.get("LOCALAPPDATA", ""), "Google\\Chrome\\Application\\chrome.exe"),
+        ]
+    else:
+        candidates = [Path(p) for p in (
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+            "/snap/bin/chromium",
+        )] + [Path(shutil.which("google-chrome") or ""), Path(shutil.which("chromium") or "")]
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    # On macOS the .app bundle parent is also a valid check.
+    if sys.platform == "darwin":
+        for candidate in candidates:
+            if str(candidate).endswith("/Contents/MacOS/Google Chrome") and candidate.parent.parent.parent.is_dir():
+                return candidate
+
+    return Path("chrome")  # let it fail with a clear error later
+
+
+def _find_edge() -> Path:
+    """Return the best-guess path to a local Microsoft Edge executable."""
+    env = os.environ.get("XIAOE_EDGE_PATH")
+    if env:
+        candidate = Path(env)
+        if candidate.is_file():
+            return candidate
+
+    if sys.platform == "darwin":
+        candidates = [
+            Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+        ]
+    elif sys.platform == "win32":
+        candidates = [
+            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Microsoft\\Edge\\Application\\msedge.exe"),
+            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "Microsoft\\Edge\\Application\\msedge.exe"),
+        ]
+    else:
+        candidates = [
+            Path("/usr/bin/microsoft-edge"),
+            Path(shutil.which("microsoft-edge") or ""),
+        ]
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    return Path("msedge")  # let it fail with a clear error later
 
 
 class BrowserError(RuntimeError):
@@ -195,13 +263,13 @@ class ChromiumManager:
 
 
 class ChromeManager(ChromiumManager):
-    def __init__(self, profile_dir: Path, executable: Path = CHROME_MAC_PATH) -> None:
-        super().__init__(profile_dir, executable, "chrome", "Google Chrome")
+    def __init__(self, profile_dir: Path, executable: Optional[Path] = None) -> None:
+        super().__init__(profile_dir, executable or _find_chrome(), "chrome", "Google Chrome")
 
 
 class EdgeManager(ChromiumManager):
-    def __init__(self, profile_dir: Path, executable: Path = EDGE_MAC_PATH) -> None:
-        super().__init__(profile_dir, executable, "edge", "Microsoft Edge")
+    def __init__(self, profile_dir: Path, executable: Optional[Path] = None) -> None:
+        super().__init__(profile_dir, executable or _find_edge(), "edge", "Microsoft Edge")
 
 
 def cookie_header(cookies: List[Dict[str, Any]], host: str) -> str:
