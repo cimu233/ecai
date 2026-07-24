@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
@@ -16,6 +17,7 @@ from .media import DIRECT_AUDIO_SUFFIXES, DownloadError, DownloadRequest, Downlo
 
 StageCallback = Optional[Callable[[str], None]]
 CHUNK_SIZE = 1024 * 1024
+PROGRESS_BAR_WIDTH = 30
 SAFE_REQUEST_HEADERS = {"accept", "accept-language", "authorization", "origin", "referer", "user-agent"}
 
 
@@ -59,13 +61,38 @@ def redact_error(message: str, source: MediaSource) -> str:
 
 
 class AudioDownloader:
-    def __init__(self, ffmpeg: Optional[str] = None, retries: int = 3, timeout: int = 60) -> None:
+    def __init__(
+        self,
+        ffmpeg: Optional[str] = None,
+        retries: int = 3,
+        timeout: int = 60,
+        show_progress: bool = True,
+    ) -> None:
         self.ffmpeg = ffmpeg or ffmpeg_executable()
         self.retries = retries
         self.timeout = timeout
+        self.show_progress = show_progress
+        self._progress_index = 0
+        self._progress_total = 0
+
+    def set_progress_context(self, index: int, total: int) -> None:
+        """Set the current file index and total for progress display."""
+        self._progress_index = index
+        self._progress_total = total
 
     def download(self, request: DownloadRequest, on_stage: StageCallback = None) -> DownloadResult:
         request.output_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.show_progress and self._progress_total > 0:
+            label = request.lesson.title[:48]
+            print(
+                "\r  [{}/{}] 正在下载：{}...".format(
+                    self._progress_index, self._progress_total, label
+                ),
+                end="",
+                file=sys.stderr,
+            )
+
         if request.source.kind == "direct_audio":
             partial_path, final_path = self._download_direct(request)
         elif request.source.kind in {"hls", "hls_audio", "video_file"}:
@@ -88,6 +115,16 @@ class AudioDownloader:
         resume_metadata = self._resume_metadata_path(partial_path)
         if resume_metadata.exists():
             resume_metadata.unlink()
+
+        if self.show_progress and self._progress_total > 0:
+            size_mb = final_path.stat().st_size / (1024 * 1024)
+            print(
+                "\r  [{}/{}] 下载完成 ✓  {}  ({:.1f} MB)".format(
+                    self._progress_index, self._progress_total, request.lesson.title[:40], size_mb
+                ),
+                file=sys.stderr,
+            )
+
         return DownloadResult(
             file_path=final_path,
             size_bytes=final_path.stat().st_size,
@@ -141,11 +178,17 @@ class AudioDownloader:
                         encoding="utf-8",
                     )
                     with partial_path.open(mode) as output:
+                        downloaded = offset
                         while True:
                             chunk = response.read(CHUNK_SIZE)
                             if not chunk:
                                 break
                             output.write(chunk)
+                            downloaded += len(chunk)
+                            if self.show_progress and total_size:
+                                self._print_progress_bar(
+                                    downloaded, total_size, request.lesson.title
+                                )
                 break
             except HTTPError as error:
                 if error.code in {401, 403}:
@@ -335,6 +378,27 @@ class AudioDownloader:
                     break
                 digest.update(chunk)
         return digest.hexdigest()
+
+    @staticmethod
+    def _print_progress_bar(downloaded: int, total: int, title: str) -> None:
+        del title  # reserved for future use
+        pct = min(downloaded / total, 1.0)
+        filled = int(PROGRESS_BAR_WIDTH * pct)
+        bar = "█" * filled + "░" * (PROGRESS_BAR_WIDTH - filled)
+        current_mb = downloaded / (1024 * 1024)
+        total_mb = total / (1024 * 1024)
+        unit = "MB"
+        if total_mb >= 1000:
+            current_mb = downloaded / (1024**3)
+            total_mb = total / (1024**3)
+            unit = "GB"
+        print(
+            "\r  {} {:5.1f}%  {:.1f}/{:.1f} {}".format(
+                bar, pct * 100, current_mb, total_mb, unit,
+            ),
+            end="",
+            file=sys.stderr,
+        )
 
     @staticmethod
     def _resume_metadata_path(partial_path: Path) -> Path:

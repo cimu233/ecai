@@ -42,8 +42,9 @@ class DownloadService:
         if lesson_id and not lessons:
             raise ValueError("Lesson does not exist in course: {}".format(lesson_id))
 
+        total = len(lessons)
         items = []
-        for lesson in lessons:
+        for idx, lesson in enumerate(lessons, 1):
             existing = self.lessons.audio_artifact(lesson.id)
             if lesson.status == "audio_ready" and existing is not None and self._artifact_is_valid(existing):
                 items.append(
@@ -54,6 +55,7 @@ class DownloadService:
                     )
                 )
                 continue
+            self.downloader.set_progress_context(idx, total)
             items.append(self._download_lesson(lesson))
 
         succeeded = sum(item.status == "audio_ready" for item in items)

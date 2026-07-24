@@ -49,7 +49,7 @@ class DownloadServiceTest(unittest.TestCase):
             lessons=self.lessons,
             resolver=StoredUrlResolver(),
             selector=MediaSelector(),
-            downloader=AudioDownloader(ffmpeg=ffmpeg_executable()),
+            downloader=AudioDownloader(ffmpeg=ffmpeg_executable(), show_progress=False),
         )
 
     def tearDown(self) -> None:
