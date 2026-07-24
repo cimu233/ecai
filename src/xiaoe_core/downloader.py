@@ -218,27 +218,75 @@ class AudioDownloader:
             partial_path.unlink()
 
         copy_command = self._ffmpeg_download_command(source, input_url, partial_path, copy_audio=True)
-        try:
-            copy_result = subprocess.run(copy_command, capture_output=True, text=True, timeout=10800)
-        except subprocess.TimeoutExpired as error:
-            raise DownloadError("ffmpeg_timeout", "ffmpeg exceeded the three-hour lesson timeout.", True) from error
-        if copy_result.returncode != 0:
-            if partial_path.exists():
-                partial_path.unlink()
-            transcode_command = self._ffmpeg_download_command(source, input_url, partial_path, copy_audio=False)
-            try:
-                transcode_result = subprocess.run(transcode_command, capture_output=True, text=True, timeout=10800)
-            except subprocess.TimeoutExpired as error:
-                raise DownloadError("ffmpeg_timeout", "ffmpeg exceeded the three-hour lesson timeout.", True) from error
-            if transcode_result.returncode != 0:
-                detail = redact_error(transcode_result.stderr or copy_result.stderr, source)
-                if "401" in detail or "403" in detail:
-                    raise DownloadError("source_expired", "Media authorization expired.", retryable=True)
-                raise DownloadError("ffmpeg_failed", "ffmpeg could not extract audio: {}".format(detail), True)
+        copy_ok, copy_stderr = self._run_ffmpeg_with_progress(copy_command, source)
+        if copy_ok:
+            if not partial_path.exists() or partial_path.stat().st_size == 0:
+                raise DownloadError("empty_download", "ffmpeg produced an empty audio file.")
+            return partial_path, final_path
+
+        if partial_path.exists():
+            partial_path.unlink()
+        transcode_command = self._ffmpeg_download_command(source, input_url, partial_path, copy_audio=False)
+        transcode_ok, transcode_stderr = self._run_ffmpeg_with_progress(transcode_command, source)
+        if not transcode_ok:
+            detail = redact_error(transcode_stderr or copy_stderr, source)
+            if "401" in detail or "403" in detail:
+                raise DownloadError("source_expired", "Media authorization expired.", retryable=True)
+            raise DownloadError("ffmpeg_failed", "ffmpeg could not extract audio: {}".format(detail), True)
 
         if not partial_path.exists() or partial_path.stat().st_size == 0:
             raise DownloadError("empty_download", "ffmpeg produced an empty audio file.")
         return partial_path, final_path
+
+    def _run_ffmpeg_with_progress(self, command: list, source: MediaSource) -> Tuple[bool, str]:
+        """Run ffmpeg and stream progress to stderr. Returns (success, stderr_tail)."""
+        progress_re = re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
+        speed_re = re.compile(r"speed=\s*([\d.]+)x")
+        collected: list = []
+        process = None
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as error:
+            raise DownloadError("ffmpeg_failed", "Could not launch ffmpeg: {}".format(error)) from error
+
+        try:
+            if process.stderr is not None:
+                for line in process.stderr:
+                    collected.append(line)
+                    if self.show_progress:
+                        match = progress_re.search(line)
+                        if match:
+                            h, m, s = int(match.group(1)), int(match.group(2)), float(match.group(3))
+                            speed_match = speed_re.search(line)
+                            speed = speed_match.group(1) if speed_match else "?"
+                            print(
+                                "\r  ffmpeg 转码中...  已处理: {:02d}:{:02d}:{:04.1f}  速度: {}x".format(
+                                    h, m, s, speed
+                                ),
+                                end="",
+                                file=sys.stderr,
+                            )
+            process.wait(timeout=10800)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise DownloadError("ffmpeg_timeout", "ffmpeg exceeded the three-hour lesson timeout.", True)
+        finally:
+            if process is not None:
+                if process.stderr is not None:
+                    process.stderr.close()
+                if process.stdout is not None:
+                    process.stdout.close()
+            if self.show_progress:
+                print("\r" + " " * 60 + "\r", end="", file=sys.stderr)
+
+        stderr_tail = "".join(collected[-20:] if len(collected) > 20 else collected)
+        return process.returncode == 0, stderr_tail
 
     def _ffmpeg_download_command(
         self,
@@ -253,7 +301,8 @@ class AudioDownloader:
             "-y",
             "-hide_banner",
             "-loglevel",
-            "error",
+            "warning",
+            "-stats",
             "-protocol_whitelist",
             "file,http,https,tcp,tls,crypto",
             "-allowed_extensions",
