@@ -53,12 +53,14 @@ class AppSettings:
         value = self.load().get("asr")
         return value if isinstance(value, dict) else {"provider": "local"}
 
+    VALID_BROWSERS = {"chrome", "edge", "ego", "playwright-chrome", "playwright-edge"}
+
     def browser(self) -> str:
         value = str(self.load().get("browser") or "chrome")
-        return value if value in {"chrome", "edge", "ego"} else "chrome"
+        return value if value in self.VALID_BROWSERS else "chrome"
 
     def save_browser(self, browser: str) -> None:
-        if browser not in {"chrome", "edge", "ego"}:
+        if browser not in self.VALID_BROWSERS:
             raise ValueError("Unsupported browser backend: {}".format(browser))
         payload = self.load()
         payload["browser"] = browser

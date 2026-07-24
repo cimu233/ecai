@@ -98,14 +98,32 @@ MENU
       echo "当前配置："
       run_xiaoe browser current
       echo
-      echo "1. Chrome（独立本地 profile）"
-      echo "2. Edge（独立本地 profile）"
+      echo "1. Chrome"
+      echo "2. Edge"
       echo "3. Ego（隔离 Task Space，共享 Ego 登录状态）"
       printf "请选择浏览器："
       read -r browser_choice
       case "$browser_choice" in
-        1) run_xiaoe browser use chrome ;;
-        2) run_xiaoe browser use edge ;;
+        1)
+          echo ""
+          printf "是否使用 Playwright 驱动？(y/n，默认 n)："
+          read -r use_pw
+          if [[ "$use_pw" = "y" || "$use_pw" = "Y" ]]; then
+            run_xiaoe browser use playwright-chrome
+          else
+            run_xiaoe browser use chrome
+          fi
+          ;;
+        2)
+          echo ""
+          printf "是否使用 Playwright 驱动？(y/n，默认 n)："
+          read -r use_pw
+          if [[ "$use_pw" = "y" || "$use_pw" = "Y" ]]; then
+            run_xiaoe browser use playwright-edge
+          else
+            run_xiaoe browser use edge
+          fi
+          ;;
         3) run_xiaoe browser use ego ;;
         *) echo "无效选项，配置未改变。" ;;
       esac

@@ -16,6 +16,7 @@ from xiaoe_core.database import Database
 from xiaoe_core.download_service import DownloadService
 from xiaoe_core.downloader import AudioDownloader
 from xiaoe_core.ego_browser import EgoBrowserManager
+from xiaoe_core.playwright_browser import PlaywrightBrowserManager
 from xiaoe_core.media import MediaSelector, StoredUrlResolver
 from xiaoe_core.pipeline import PipelineRunner
 from xiaoe_core.services import CourseService, LessonService
@@ -37,7 +38,11 @@ DEFAULT_AUTH_URL = "https://study.xiaoe-tech.com"
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xiaoe", description="Local Xiaoe audio pipeline")
     parser.add_argument("--data-dir", help="Runtime data directory; defaults to ~/.xiaoe-audio-pipeline")
-    parser.add_argument("--browser", choices=["chrome", "edge", "ego"], dest="browser_backend")
+    parser.add_argument(
+        "--browser",
+        choices=["chrome", "edge", "ego", "playwright-chrome", "playwright-edge"],
+        dest="browser_backend",
+    )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     course_parser = subcommands.add_parser("course", help="Manage courses")
@@ -128,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     browser_current = browser_commands.add_parser("current", help="Show the selected browser")
     browser_current.add_argument("--json", action="store_true", dest="as_json")
     browser_use = browser_commands.add_parser("use", help="Persist the selected browser")
-    browser_use.add_argument("backend", choices=["chrome", "edge", "ego"])
+    browser_use.add_argument("backend", choices=["chrome", "edge", "ego", "playwright-chrome", "playwright-edge"])
     browser_use.add_argument("--json", action="store_true", dest="as_json")
 
     asr_parser = subcommands.add_parser("asr", help="Inspect or select ASR providers")
@@ -159,7 +164,13 @@ def emit(payload: Any, as_json: bool) -> None:
 
 
 def browser_label(browser: str) -> str:
-    return {"chrome": "Chrome", "edge": "Edge", "ego": "Ego"}.get(browser, browser)
+    return {
+        "chrome": "Chrome (CDP)",
+        "edge": "Edge (CDP)",
+        "ego": "Ego",
+        "playwright-chrome": "Chrome (Playwright)",
+        "playwright-edge": "Edge (Playwright)",
+    }.get(browser, browser)
 
 
 def emit_auth(payload: dict, as_json: bool) -> None:
@@ -254,6 +265,10 @@ def build_browser_manager(arguments: argparse.Namespace, paths: AppPaths) -> Any
     selected = arguments.browser_backend or AppSettings(paths.settings_file).browser()
     if selected == "ego":
         return EgoBrowserManager()
+    if selected == "playwright-chrome":
+        return PlaywrightBrowserManager("playwright-chrome", paths.browser_profile_dir)
+    if selected == "playwright-edge":
+        return PlaywrightBrowserManager("playwright-edge", paths.edge_profile_dir)
     if selected == "edge":
         return EdgeManager(paths.edge_profile_dir)
     return ChromeManager(paths.browser_profile_dir)

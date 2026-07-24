@@ -17,13 +17,14 @@ class AppSettingsTest(unittest.TestCase):
             self.assertEqual("whisper-model", payload["asr"]["model"])
             self.assertNotIn("api_key", json.dumps(payload))
 
-    def test_browser_selection_defaults_to_chrome_and_supports_edge_and_ego(self):
+    def test_browser_selection_defaults_to_chrome_and_supports_all_backends(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "settings.json"
             settings = AppSettings(path)
             self.assertEqual("chrome", settings.browser())
-            settings.save_browser("edge")
-            self.assertEqual("edge", settings.browser())
-            settings.save_browser("ego")
-            self.assertEqual("ego", settings.browser())
-            self.assertEqual("ego", json.loads(path.read_text(encoding="utf-8"))["browser"])
+            for backend in ("edge", "ego", "playwright-chrome", "playwright-edge"):
+                settings.save_browser(backend)
+                self.assertEqual(backend, settings.browser())
+                self.assertEqual(backend, json.loads(path.read_text(encoding="utf-8"))["browser"])
+            with self.assertRaises(ValueError):
+                settings.save_browser("firefox")
