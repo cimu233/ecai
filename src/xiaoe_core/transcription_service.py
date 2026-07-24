@@ -56,11 +56,16 @@ class TranscriptionService:
         )
 
     def transcribe_course(
-        self, course_id: str, lesson_id: Optional[str] = None, limit: Optional[int] = None, force: bool = False
+        self,
+        course_id: str,
+        lesson_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        force: bool = False,
+        positions: Optional[set] = None,
     ) -> TranscriptionBatchResult:
         if self.courses.get(course_id) is None:
             raise ValueError("Course does not exist: {}".format(course_id))
-        lessons = self.lessons.list_for_download(course_id, lesson_id, limit)
+        lessons = self.lessons.list_for_download(course_id, lesson_id, limit, positions)
         if lesson_id and not lessons:
             raise ValueError("Lesson does not exist in course: {}".format(lesson_id))
         try:

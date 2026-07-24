@@ -3,8 +3,9 @@
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from .browser import BrowserError, cookie_header, inspect_page
@@ -102,6 +103,7 @@ class XiaoeCatalogService:
         if course is None:
             raise ValueError("Course does not exist: {}".format(course_id))
         raw_path = self.paths.courses_dir / course.id / "catalog.raw.json"
+        cached_items = self._cached_items(raw_path)
         try:
             items = self._capture_items(course)
             raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -112,6 +114,11 @@ class XiaoeCatalogService:
             items = self._cached_items(raw_path)
             if not items:
                 raise
+
+        # Report what changed since the last scan.
+        if cached_items:
+            self._diff_and_report(cached_items, items)
+
         items.sort(key=lambda item: self._position(item, 2**31))
         with self.courses.database.connect() as connection:
             connection.execute("UPDATE lessons SET position = -position WHERE course_id = ?", (course.id,))
@@ -140,6 +147,72 @@ class XiaoeCatalogService:
                 "UPDATE courses SET status = 'catalog_ready', updated_at = ? WHERE id = ?", (utc_now(), course.id)
             )
         return sorted(lessons, key=lambda lesson: lesson.position)
+
+    @staticmethod
+    def _diff_and_report(
+        old_items: List[Dict[str, Any]], new_items: List[Dict[str, Any]]
+    ) -> None:
+        """Compare cached and fresh catalogs, print a change summary to stderr."""
+
+        def key(item: Dict[str, Any]) -> str:
+            return str(item.get("resource_id") or item.get("resourceId"))
+
+        def title(item: Dict[str, Any]) -> str:
+            return str(
+                item.get("chapter_title")
+                or item.get("resource_title")
+                or item.get("title")
+                or item.get("resource_name")
+                or item.get("name")
+                or key(item)
+            )
+
+        old_by_id: Dict[str, Tuple[int, str]] = {}
+        for idx, item in enumerate(old_items):
+            old_by_id[key(item)] = (idx + 1, title(item))
+
+        new_by_id: Dict[str, Tuple[int, str]] = {}
+        for idx, item in enumerate(new_items):
+            new_by_id[key(item)] = (idx + 1, title(item))
+
+        old_ids = set(old_by_id)
+        new_ids = set(new_by_id)
+
+        added = new_ids - old_ids
+        removed = old_ids - new_ids
+        kept = old_ids & new_ids
+
+        position_shifts = 0
+        title_changes = 0
+        for rid in kept:
+            old_pos, old_title = old_by_id[rid]
+            new_pos, new_title = new_by_id[rid]
+            if old_pos != new_pos:
+                position_shifts += 1
+            if old_title != new_title:
+                title_changes += 1
+
+        if not added and not removed and position_shifts == 0 and title_changes == 0:
+            print("  (目录无变化，与上次扫描一致)", file=sys.stderr)
+            return
+
+        changes = []
+        if added:
+            changes.append("新增 {} 节".format(len(added)))
+        if removed:
+            changes.append("移除 {} 节".format(len(removed)))
+        if position_shifts:
+            changes.append("{} 节位置变动（已自动重新映射）".format(position_shifts))
+        if title_changes:
+            changes.append("{} 节标题有变化".format(title_changes))
+        if changes:
+            print("  目录有更新：" + "，".join(changes), file=sys.stderr)
+
+        if removed and len(removed) <= 10:
+            for rid in sorted(removed, key=lambda r: old_by_id[r][0]):
+                print("    − [{:d}] {}".format(old_by_id[rid][0], old_by_id[rid][1]), file=sys.stderr)
+        elif removed:
+            print("    (移除节数较多，已自动清理)", file=sys.stderr)
 
     def _capture_items(self, course: Any) -> List[Dict[str, Any]]:
         if hasattr(self.chrome, "capture_catalog"):

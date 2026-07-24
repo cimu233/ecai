@@ -73,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe_parser.add_argument("course_id")
     transcribe_parser.add_argument("--lesson", dest="lesson_id")
     transcribe_parser.add_argument("--limit", type=int)
+    transcribe_parser.add_argument("--positions", help="Lesson positions (same format as download)")
     transcribe_parser.add_argument("--provider", choices=list(PROVIDER_SPECS))
     transcribe_parser.add_argument("--model")
     transcribe_parser.add_argument("--language", help="Known language, for example zh or en")
@@ -534,6 +535,10 @@ def run(arguments: argparse.Namespace) -> int:
         return 1 if result.failed else 0
 
     if arguments.command == "transcribe":
+        from xiaoe_core.services import parse_positions
+        position_set = None
+        if arguments.positions:
+            position_set = parse_positions(arguments.positions)
         lessons = LessonService(service.database)
         provider = build_asr_provider(arguments, paths, arguments.provider)
         transcription = TranscriptionService(paths, service, lessons, provider)
@@ -542,6 +547,7 @@ def run(arguments: argparse.Namespace) -> int:
             lesson_id=arguments.lesson_id,
             limit=arguments.limit,
             force=arguments.force,
+            positions=position_set,
         )
         if arguments.as_json:
             emit(result.to_dict(), True)
