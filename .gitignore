@@ -1,16 +1,52 @@
+# Python cache
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.venv/
-.local-asr-venv/
-build/
-dist/
+*.pyo
 *.egg-info/
+dist/
+build/
+
+# Test / linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+.local-asr-venv/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment & secrets
 .env
-.xiaoe-data/
-data/
+xiaoe-login.json
+
+# Runtime data (if placed inside project)
 courses/
 downloads/
 transcripts/
 browser-profile/
-xiaoe-login.json
+data/
+.xiaoe-data/
+
+# Database snapshots / partial files
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.partial
+
+# OS temp files
+Thumbs.db
+ehthumbs.db
