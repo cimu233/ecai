@@ -41,7 +41,10 @@ class PipelineRunner:
     ) -> PipelineRunResult:
         download = self.downloads.download_course(course_id, lesson_id=lesson_id, limit=limit)
         if download.processed == 0:
-            raise ValueError("Course has no lessons. Refresh the course catalog before running the pipeline.")
+            raise ValueError("该课程尚未扫描内容目录，请先执行「扫描课程目录」。")
+        if download.succeeded == 0 and download.failed > 0:
+            # All lessons failed — likely a text/image-only course with no audio.
+            raise ValueError("该课程所有课时均无可下载的音频，可能为图文公告或纯视频课程（无音频流）。")
         transcription = self.transcriptions.transcribe_course(
             course_id, lesson_id=lesson_id, limit=limit, force=force_transcription
         )

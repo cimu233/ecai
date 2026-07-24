@@ -38,20 +38,29 @@ while true; do
 ========================================
        Xiaoe Audio Pipeline
 ========================================
-1. 使用保存凭据登录当前浏览器
-2. 检查登录状态
-3. 添加课程
-4. 查看课程列表
-5. 扫描某门课程内容目录
-6. 试跑一节课
-7. 运行整门课程
-8. 查看任务状态
-9. 检查本地 Qwen ASR
-10. 配置语音转文字服务
-11. 扫描账号全部课程
-12. 切换浏览器（Chrome / Edge / Ego）
-13. 配置小鹅通登录凭据
-14. 退出
+—— 账户 ——
+ 1. 登录当前浏览器
+ 2. 检查登录状态
+ 3. 配置登录凭据
+ 4. 切换浏览器（Chrome / Edge / Ego）
+
+—— 课程 ——
+ 5. 导入账号全部课程
+ 6. 手动添加课程
+ 7. 查看课程列表
+ 8. 扫描课程目录
+
+—— 下载与处理 ——
+ 9. 下载课程音频
+10. 试跑一节课（下载+转写+整理）
+11. 运行整门课程（下载+转写+整理）
+
+—— 工具 ——
+12. 查看任务状态
+13. 配置语音转文字服务
+14. 检查本地 Qwen ASR
+
+15. 退出
 ========================================
 MENU
   printf "请选择："
@@ -81,67 +90,10 @@ MENU
       pause_screen
       ;;
     3)
-      printf "课程地址："
-      read -r course_url
-      printf "课程名称："
-      read -r course_title
-      run_xiaoe course add "$course_url" --title "$course_title"
+      "$python_bin" "$project_dir/scripts/configure_xiaoe_login.py"
       pause_screen
       ;;
     4)
-      run_xiaoe course list
-      pause_screen
-      ;;
-    5)
-      course_id="$(select_course)"
-      if [[ -n "$course_id" ]]; then
-        run_xiaoe course refresh "$course_id"
-      fi
-      pause_screen
-      ;;
-    6)
-      course_id="$(select_course)"
-      if [[ -n "$course_id" ]]; then
-        run_xiaoe run "$course_id" --limit 1 --language zh
-      fi
-      pause_screen
-      ;;
-    7)
-      course_id="$(select_course)"
-      if [[ -n "$course_id" ]]; then
-        run_xiaoe run "$course_id" --language zh
-      fi
-      pause_screen
-      ;;
-    8)
-      run_xiaoe status
-      pause_screen
-      ;;
-    9)
-      "$project_dir/.local-asr-venv/bin/python" - <<'PY'
-import torch
-from qwen_asr import Qwen3ASRModel
-from pathlib import Path
-
-model = Path.home() / "Library/Application Support/OpenLess/models/qwen3-asr/qwen3-asr-1.7b"
-print("模型目录：", model)
-print("模型完整：", (model / "model.safetensors.index.json").is_file())
-print("PyTorch：", torch.__version__)
-print("Apple MPS：", torch.backends.mps.is_available())
-print("Qwen 运行时：", Qwen3ASRModel.__name__)
-PY
-      pause_screen
-      ;;
-    10)
-      "$python_bin" "$project_dir/scripts/configure_asr.py"
-      pause_screen
-      ;;
-    11)
-      echo "正在扫描已保存店铺账号下的全部课程..."
-      run_xiaoe course scan-account
-      pause_screen
-      ;;
-    12)
       echo "当前配置："
       run_xiaoe browser current
       echo
@@ -158,11 +110,85 @@ PY
       esac
       pause_screen
       ;;
+    5)
+      echo "正在扫描已保存店铺账号下的全部课程..."
+      run_xiaoe course scan-account
+      pause_screen
+      ;;
+    6)
+      printf "课程地址："
+      read -r course_url
+      printf "课程名称："
+      read -r course_title
+      run_xiaoe course add "$course_url" --title "$course_title"
+      pause_screen
+      ;;
+    7)
+      run_xiaoe course list
+      pause_screen
+      ;;
+    8)
+      course_id="$(select_course)"
+      if [[ -n "$course_id" ]]; then
+        run_xiaoe course refresh "$course_id"
+        scan_status=$?
+        if [[ "$scan_status" -eq 0 ]]; then
+          echo ""
+          printf "是否下载该课程音频？(y/n)："
+          read -r download_choice
+          if [[ "$download_choice" = "y" || "$download_choice" = "Y" ]]; then
+            echo ""
+            run_xiaoe download "$course_id"
+          fi
+        fi
+      fi
+      pause_screen
+      ;;
+    9)
+      course_id="$(select_course)"
+      if [[ -n "$course_id" ]]; then
+        run_xiaoe download "$course_id"
+      fi
+      pause_screen
+      ;;
+    10)
+      course_id="$(select_course)"
+      if [[ -n "$course_id" ]]; then
+        run_xiaoe run "$course_id" --limit 1 --language zh
+      fi
+      pause_screen
+      ;;
+    11)
+      course_id="$(select_course)"
+      if [[ -n "$course_id" ]]; then
+        run_xiaoe run "$course_id" --language zh
+      fi
+      pause_screen
+      ;;
+    12)
+      run_xiaoe status
+      pause_screen
+      ;;
     13)
-      "$python_bin" "$project_dir/scripts/configure_xiaoe_login.py"
+      "$python_bin" "$project_dir/scripts/configure_asr.py"
       pause_screen
       ;;
     14)
+      "$project_dir/.local-asr-venv/bin/python" - <<'PY'
+import torch
+from qwen_asr import Qwen3ASRModel
+from pathlib import Path
+
+model = Path.home() / "Library/Application Support/OpenLess/models/qwen3-asr/qwen3-asr-1.7b"
+print("模型目录：", model)
+print("模型完整：", (model / "model.safetensors.index.json").is_file())
+print("PyTorch：", torch.__version__)
+print("Apple MPS：", torch.backends.mps.is_available())
+print("Qwen 运行时：", Qwen3ASRModel.__name__)
+PY
+      pause_screen
+      ;;
+    15)
       exit 0
       ;;
     *)

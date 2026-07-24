@@ -508,18 +508,22 @@ def run(arguments: argparse.Namespace) -> int:
         )
         if arguments.as_json:
             emit(result.to_dict(), True)
+        elif result.processed == 0:
+            print("该课程尚未扫描内容目录，请先执行「扫描课程目录」。")
         else:
-            emit(
-                "Processed: {} | Succeeded: {} | Skipped: {} | Failed: {}".format(
+            print(
+                "处理 {} 节，成功 {} 节，跳过 {} 节，失败 {} 节".format(
                     result.processed,
                     result.succeeded,
                     result.skipped,
                     result.failed,
-                ),
-                False,
+                )
             )
             for item in result.items:
-                print("{}\t{}\t{}".format(item.lesson_id, item.status, item.file_path or item.error or ""))
+                label = {"audio_ready": "已下载", "skipped": "已跳过", "source_unavailable": "无音频源", "download_failed": "下载失败"}.get(
+                    item.status, item.status
+                )
+                print("  {} — {}".format(item.lesson_id, label))
         return 1 if result.failed else 0
 
     if arguments.command == "transcribe":

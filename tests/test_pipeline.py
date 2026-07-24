@@ -4,10 +4,12 @@ from xiaoe_core.pipeline import PipelineRunner
 
 
 class Result:
-    def __init__(self, stage, failed=0, processed=1):
+    def __init__(self, stage, failed=0, processed=1, succeeded=0, skipped=0):
         self.stage = stage
         self.failed = failed
         self.processed = processed
+        self.succeeded = succeeded
+        self.skipped = skipped
 
     def to_dict(self):
         return {"stage": self.stage, "failed": self.failed}
@@ -21,15 +23,16 @@ class Stage:
 
     def download_course(self, course_id, **kwargs):
         self.calls.append((course_id, kwargs))
-        return Result(self.name, self.failed)
+        succeeded = 1 if self.failed == 0 and kwargs.get("limit", 0) != 0 else 0
+        return Result(self.name, self.failed, succeeded=succeeded)
 
     def transcribe_course(self, course_id, **kwargs):
         self.calls.append((course_id, kwargs))
-        return Result(self.name, self.failed)
+        return Result(self.name, self.failed, succeeded=1 if self.failed == 0 else 0)
 
     def structure_course(self, course_id, **kwargs):
         self.calls.append((course_id, kwargs))
-        return Result(self.name, self.failed)
+        return Result(self.name, self.failed, succeeded=1 if self.failed == 0 else 0)
 
 
 class PipelineRunnerTest(unittest.TestCase):
@@ -58,7 +61,7 @@ class PipelineRunnerTest(unittest.TestCase):
             return Result("download", processed=0)
 
         download.download_course = empty_download
-        with self.assertRaisesRegex(ValueError, "no lessons"):
+        with self.assertRaisesRegex(ValueError, "尚未扫描内容目录"):
             PipelineRunner(download, Stage("transcription"), Stage("structure")).run("c")
 
 

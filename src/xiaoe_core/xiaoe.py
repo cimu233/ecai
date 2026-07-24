@@ -170,7 +170,10 @@ class XiaoeCatalogService:
             items.extend(find_catalog_items(payload))
         items = list({self._resource_id(item): item for item in items}.values())
         if not items:
-            raise BrowserError("catalog_not_found", "No Xiaoe lesson catalog was observed on the course page.")
+            raise BrowserError(
+                "catalog_not_found",
+                "该课程页面未找到可下载的内容目录，可能为纯图文公告、免费试听课或暂未开课的课程。",
+            )
         return items
 
     @staticmethod
