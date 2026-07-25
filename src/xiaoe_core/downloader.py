@@ -22,6 +22,12 @@ SAFE_REQUEST_HEADERS = {"accept", "accept-language", "authorization", "origin", 
 
 
 def ffmpeg_executable() -> str:
+    # When packaged by PyInstaller, ffmpeg.exe is bundled alongside the exe.
+    if getattr(sys, "frozen", False):
+        bundled = Path(getattr(sys, "_MEIPASS", "") or Path(sys.executable).parent) / "ffmpeg.exe"
+        if bundled.is_file():
+            return str(bundled)
+    # Fall back to imageio-ffmpeg (downloads on first use).
     try:
         import imageio_ffmpeg
     except ImportError as error:

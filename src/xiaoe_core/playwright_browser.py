@@ -2,10 +2,24 @@
 
 import base64
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .browser import BrowserError, classify_xiaoe_page
+
+
+def _bundled_playwright_browsers_path() -> Optional[str]:
+    """Return the path to bundled Playwright browsers (next to exe or inside bundle)."""
+    bases = [Path(sys.executable).parent]
+    if getattr(sys, "frozen", False):
+        bases.append(Path(getattr(sys, "_MEIPASS", "")))
+    for base in bases:
+        candidate = base / "playwright-browsers"
+        if candidate.is_dir():
+            return str(candidate)
+    return None
 
 
 class PlaywrightPage:
@@ -141,6 +155,11 @@ class PlaywrightBrowserManager:
                 return "playwright-active"
             except Exception:
                 pass
+
+        # When packaged as a Windows exe, point Playwright at the bundled browsers.
+        bundled = _bundled_playwright_browsers_path()
+        if bundled:
+            os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", bundled)
 
         try:
             from playwright.sync_api import sync_playwright  # type: ignore[import-untyped]

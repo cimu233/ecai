@@ -1,0 +1,153 @@
+name: Build Windows installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Extract ffmpeg binary for bundling
+        run: |
+          python -c @"
+          from imageio_ffmpeg import get_ffmpeg_exe
+          import shutil, os
+          src = get_ffmpeg_exe()
+          shutil.copy(src, 'ffmpeg.exe')
+          print(f'ffmpeg ready ({os.path.getsize(src)} bytes)')
+          "@
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
+
+      - name: Build ecai.exe
+        run: |
+          pyinstaller `
+            --onefile `
+            --name ecai `
+            --add-binary "ffmpeg.exe;." `
+            --add-data "src/xiaoe_cli;xiaoe_cli" `
+            --add-data "src/xiaoe_core;xiaoe_core" `
+            --hidden-import xiaoe_core `
+            --hidden-import xiaoe_core.browser `
+            --hidden-import xiaoe_core.config `
+            --hidden-import xiaoe_core.auth `
+            --hidden-import xiaoe_core.downloader `
+            --hidden-import xiaoe_core.media `
+            --hidden-import xiaoe_core.models `
+            --hidden-import xiaoe_core.services `
+            --hidden-import xiaoe_core.database `
+            --hidden-import xiaoe_core.download_service `
+            --hidden-import xiaoe_core.ego_browser `
+            --hidden-import xiaoe_core.playwright_browser `
+            --hidden-import xiaoe_core.asr `
+            --hidden-import xiaoe_core.asr_registry `
+            --hidden-import xiaoe_core.secrets `
+            --hidden-import xiaoe_core.slider_captcha `
+            --hidden-import xiaoe_core.pipeline `
+            --hidden-import xiaoe_core.structure_service `
+            --hidden-import xiaoe_core.structurer `
+            --hidden-import xiaoe_core.transcription_service `
+            --hidden-import xiaoe_core.xiaoe `
+            --hidden-import xiaoe_cli `
+            --hidden-import xiaoe_cli.main `
+            --hidden-import xiaoe_cli.course_picker `
+            src/xiaoe_cli/main.py
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+          ls dist/
+
+      - name: Locate Playwright Chromium
+        id: pw
+        run: |
+          $exe = python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()"
+          $root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $exe))
+          echo "pw_root=$root" >> $env:GITHUB_OUTPUT
+
+      - name: Prepare bundled Playwright browsers
+        run: |
+          mkdir dist\playwright-browsers -Force
+          Copy-Item -Recurse "${{ steps.pw.outputs.pw_root }}\*" "dist\playwright-browsers\"
+
+      - name: Create NSIS script
+        run: |
+          @'
+          !include "MUI2.nsh"
+
+          Name "ecai"
+          OutFile "ecai-setup.exe"
+          InstallDir "$PROGRAMFILES\ecai"
+          RequestExecutionLevel admin
+          BrandingText "ecai"
+
+          !insertmacro MUI_PAGE_WELCOME
+          !insertmacro MUI_PAGE_DIRECTORY
+          !insertmacro MUI_PAGE_INSTFILES
+          !insertmacro MUI_PAGE_FINISH
+          !insertmacro MUI_LANGUAGE "SimpChinese"
+
+          Section "Install"
+            SetOutPath "$INSTDIR"
+            File "dist\ecai.exe"
+            IfFileExists "dist\playwright-browsers\*" 0 +2
+            File /r "dist\playwright-browsers\*"
+            CreateDirectory "$SMPROGRAMS\ecai"
+            CreateShortCut "$SMPROGRAMS\ecai\ecai.lnk" "$INSTDIR\ecai.exe"
+            WriteUninstaller "$INSTDIR\uninst.exe"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ecai" \
+              "DisplayName" "ecai"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ecai" \
+              "UninstallString" "$INSTDIR\uninst.exe"
+          SectionEnd
+
+          Section "Uninstall"
+            Delete "$INSTDIR\ecai.exe"
+            RMDir /r "$INSTDIR\playwright-browsers"
+            Delete "$INSTDIR\uninst.exe"
+            RMDir "$INSTDIR"
+            Delete "$SMPROGRAMS\ecai\ecai.lnk"
+            RMDir "$SMPROGRAMS\ecai"
+            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ecai"
+          SectionEnd
+          '@ | Set-Content installer.nsi
+
+      - name: Build NSIS installer
+        run: |
+          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (!(Test-Path $nsis)) {
+            choco install nsis -y --no-progress
+            $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          }
+          & $nsis installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "NSIS failed" }
+          ls ecai-setup.exe
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecai-windows-installer
+          path: ecai-setup.exe
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ecai-setup.exe
+          generate_release_notes: true
