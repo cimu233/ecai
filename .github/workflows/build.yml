@@ -1,4 +1,4 @@
-name: Build Windows installer
+name: Build Windows installers
 
 on:
   push:
@@ -6,70 +6,156 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
+  # ── Lite (online) installer: minimal exe, deps downloaded at first run ──
+  build-lite:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: pwsh
+    defaults: { run: { shell: pwsh } }
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
 
-      - name: Install Python dependencies
+      - name: Install build tools
+        run: pip install pyinstaller
+
+      - name: Build minimal ecai.exe
         run: |
-          python -m pip install --upgrade pip
+          pyinstaller `
+            --onefile --name ecai `
+            --hidden-import xiaoe_core `
+            --hidden-import xiaoe_core.config `
+            --hidden-import xiaoe_core.browser `
+            --hidden-import xiaoe_core.database `
+            --hidden-import xiaoe_core.services `
+            --hidden-import xiaoe_core.models `
+            --hidden-import xiaoe_core.media `
+            --hidden-import xiaoe_core.pipeline `
+            --hidden-import xiaoe_core.ego_browser `
+            --hidden-import xiaoe_core.playwright_browser `
+            --hidden-import xiaoe_core.xiaoe `
+            --hidden-import xiaoe_core.downloader `
+            --hidden-import xiaoe_core.download_service `
+            --hidden-import xiaoe_core.transcription_service `
+            --hidden-import xiaoe_core.structure_service `
+            --hidden-import xiaoe_core.structurer `
+            --hidden-import xiaoe_core.asr `
+            --hidden-import xiaoe_core.asr_registry `
+            --hidden-import xiaoe_core.auth `
+            --hidden-import xiaoe_core.secrets `
+            --hidden-import xiaoe_core.slider_captcha `
+            --hidden-import xiaoe_core.api `
+            --hidden-import xiaoe_cli `
+            --hidden-import xiaoe_cli.main `
+            --hidden-import xiaoe_cli.setup `
+            --hidden-import xiaoe_cli.course_picker `
+            --collect-all pip `
+            src/xiaoe_cli/main.py
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+          ls dist/
+
+      - name: Build NSIS lite installer
+        run: |
+          @'
+          !include "MUI2.nsh"
+          Name "ecai"
+          OutFile "ecai-setup-lite.exe"
+          InstallDir "$PROGRAMFILES\ecai"
+          RequestExecutionLevel admin
+          !insertmacro MUI_PAGE_WELCOME
+          !insertmacro MUI_PAGE_DIRECTORY
+          !insertmacro MUI_PAGE_INSTFILES
+          !insertmacro MUI_PAGE_FINISH
+          !insertmacro MUI_LANGUAGE "SimpChinese"
+          Section "Install"
+            SetOutPath "$INSTDIR"
+            File "dist\ecai.exe"
+            CreateDirectory "$SMPROGRAMS\ecai"
+            CreateShortCut "$SMPROGRAMS\ecai\ecai.lnk" "$INSTDIR\ecai.exe"
+            WriteUninstaller "$INSTDIR\uninst.exe"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ecai" \
+              "DisplayName" "ecai"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ecai" \
+              "UninstallString" "$INSTDIR\uninst.exe"
+          SectionEnd
+          Section "Uninstall"
+            Delete "$INSTDIR\ecai.exe"
+            Delete "$INSTDIR\uninst.exe"
+            RMDir "$INSTDIR"
+            Delete "$SMPROGRAMS\ecai\ecai.lnk"
+            RMDir "$SMPROGRAMS\ecai"
+            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ecai"
+          SectionEnd
+          '@ | Set-Content installer-lite.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer-lite.nsi
+          ls ecai-setup-lite.exe
+
+      - uses: actions/upload-artifact@v4
+        with: { name: ecai-lite-installer, path: ecai-setup-lite.exe }
+
+  # ── Full (offline) installer: everything bundled ──
+  build-full:
+    runs-on: windows-latest
+    defaults: { run: { shell: pwsh } }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install all dependencies
+        run: |
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Extract ffmpeg binary for bundling
+      - name: Extract ffmpeg binary
         run: |
           python -c @"
           from imageio_ffmpeg import get_ffmpeg_exe
-          import shutil, os
-          src = get_ffmpeg_exe()
-          shutil.copy(src, 'ffmpeg.exe')
-          print(f'ffmpeg ready ({os.path.getsize(src)} bytes)')
+          import shutil
+          shutil.copy(get_ffmpeg_exe(), 'ffmpeg.exe')
           "@
 
       - name: Install Playwright Chromium
         run: playwright install chromium --with-deps
 
-      - name: Build ecai.exe
+      - name: Build full ecai.exe
         run: |
           pyinstaller `
-            --onefile `
-            --name ecai `
+            --onefile --name ecai `
             --add-binary "ffmpeg.exe;." `
-            --add-data "src/xiaoe_cli;xiaoe_cli" `
-            --add-data "src/xiaoe_core;xiaoe_core" `
             --hidden-import xiaoe_core `
-            --hidden-import xiaoe_core.browser `
             --hidden-import xiaoe_core.config `
-            --hidden-import xiaoe_core.auth `
-            --hidden-import xiaoe_core.downloader `
-            --hidden-import xiaoe_core.media `
-            --hidden-import xiaoe_core.models `
-            --hidden-import xiaoe_core.services `
+            --hidden-import xiaoe_core.browser `
             --hidden-import xiaoe_core.database `
-            --hidden-import xiaoe_core.download_service `
+            --hidden-import xiaoe_core.services `
+            --hidden-import xiaoe_core.models `
+            --hidden-import xiaoe_core.media `
+            --hidden-import xiaoe_core.pipeline `
             --hidden-import xiaoe_core.ego_browser `
             --hidden-import xiaoe_core.playwright_browser `
-            --hidden-import xiaoe_core.asr `
-            --hidden-import xiaoe_core.asr_registry `
-            --hidden-import xiaoe_core.secrets `
-            --hidden-import xiaoe_core.slider_captcha `
-            --hidden-import xiaoe_core.pipeline `
+            --hidden-import xiaoe_core.xiaoe `
+            --hidden-import xiaoe_core.downloader `
+            --hidden-import xiaoe_core.download_service `
+            --hidden-import xiaoe_core.transcription_service `
             --hidden-import xiaoe_core.structure_service `
             --hidden-import xiaoe_core.structurer `
-            --hidden-import xiaoe_core.transcription_service `
-            --hidden-import xiaoe_core.xiaoe `
+            --hidden-import xiaoe_core.asr `
+            --hidden-import xiaoe_core.asr_registry `
+            --hidden-import xiaoe_core.auth `
+            --hidden-import xiaoe_core.secrets `
+            --hidden-import xiaoe_core.slider_captcha `
+            --hidden-import xiaoe_core.api `
             --hidden-import xiaoe_cli `
             --hidden-import xiaoe_cli.main `
+            --hidden-import xiaoe_cli.setup `
             --hidden-import xiaoe_cli.course_picker `
+            --collect-all websocket `
+            --collect-all imageio_ffmpeg `
+            --collect-all playwright `
+            --collect-all cv2 `
+            --collect-all numpy `
+            --collect-all keyring `
             src/xiaoe_cli/main.py
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
           ls dist/
@@ -81,28 +167,24 @@ jobs:
           $root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $exe))
           echo "pw_root=$root" >> $env:GITHUB_OUTPUT
 
-      - name: Prepare bundled Playwright browsers
+      - name: Bundle Playwright browsers
         run: |
           mkdir dist\playwright-browsers -Force
           Copy-Item -Recurse "${{ steps.pw.outputs.pw_root }}\*" "dist\playwright-browsers\"
 
-      - name: Create NSIS script
+      - name: Build NSIS full installer
         run: |
           @'
           !include "MUI2.nsh"
-
           Name "ecai"
-          OutFile "ecai-setup.exe"
+          OutFile "ecai-setup-full.exe"
           InstallDir "$PROGRAMFILES\ecai"
           RequestExecutionLevel admin
-          BrandingText "ecai"
-
           !insertmacro MUI_PAGE_WELCOME
           !insertmacro MUI_PAGE_DIRECTORY
           !insertmacro MUI_PAGE_INSTFILES
           !insertmacro MUI_PAGE_FINISH
           !insertmacro MUI_LANGUAGE "SimpChinese"
-
           Section "Install"
             SetOutPath "$INSTDIR"
             File "dist\ecai.exe"
@@ -116,7 +198,6 @@ jobs:
             WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ecai" \
               "UninstallString" "$INSTDIR\uninst.exe"
           SectionEnd
-
           Section "Uninstall"
             Delete "$INSTDIR\ecai.exe"
             RMDir /r "$INSTDIR\playwright-browsers"
@@ -126,28 +207,26 @@ jobs:
             RMDir "$SMPROGRAMS\ecai"
             DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ecai"
           SectionEnd
-          '@ | Set-Content installer.nsi
+          '@ | Set-Content installer-full.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer-full.nsi
+          ls ecai-setup-full.exe
 
-      - name: Build NSIS installer
-        run: |
-          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (!(Test-Path $nsis)) {
-            choco install nsis -y --no-progress
-            $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          }
-          & $nsis installer.nsi
-          if ($LASTEXITCODE -ne 0) { throw "NSIS failed" }
-          ls ecai-setup.exe
+      - uses: actions/upload-artifact@v4
+        with: { name: ecai-full-installer, path: ecai-setup-full.exe }
 
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+  # ── Release upload (on tag) ──
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-lite, build-full]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: ecai-lite-installer }
+      - uses: actions/download-artifact@v4
+        with: { name: ecai-full-installer }
+      - uses: softprops/action-gh-release@v2
         with:
-          name: ecai-windows-installer
-          path: ecai-setup.exe
-
-      - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ecai-setup.exe
+          files: |
+            ecai-setup-lite.exe
+            ecai-setup-full.exe
           generate_release_notes: true

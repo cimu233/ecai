@@ -41,20 +41,44 @@ def pip_index_url() -> str:
 
 
 def _run_pip(args: list, index_url: str) -> bool:
-    """Run pip commands, return True on success."""
-    cmd = [sys.executable, "-m", "pip", "install", "--index-url", index_url,
-           "--trusted-host", urllib.parse.urlparse(index_url).hostname or ""]
-    cmd.extend(args)
+    """Run pip install. Uses internal API if running as PyInstaller exe."""
     print("  → {}".format(" ".join(args)))
     try:
-        subprocess.check_call(cmd, stdout=sys.stderr, stderr=sys.stderr)
+        if getattr(sys, "frozen", False):
+            _run_pip_internal(args, index_url)
+        else:
+            _run_pip_subprocess(args, index_url)
         return True
-    except subprocess.CalledProcessError:
+    except Exception as exc:
+        print("  pip 安装失败: {}".format(exc), file=sys.stderr)
         return False
 
 
+def _run_pip_subprocess(args: list, index_url: str) -> None:
+    hostname = urllib.parse.urlparse(index_url).hostname or ""
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install",
+         "--index-url", index_url, "--trusted-host", hostname] + args,
+        stdout=sys.stderr, stderr=sys.stderr,
+    )
+
+
+def _run_pip_internal(args: list, index_url: str) -> None:
+    hostname = urllib.parse.urlparse(index_url).hostname or ""
+    sys.argv = ["pip", "install", "--index-url", index_url,
+                "--trusted-host", hostname] + args
+    from pip._internal.cli.main import main as pip_main
+    raise SystemExit(pip_main())
+
+
 def ensure_pip() -> bool:
-    """Make sure pip is usable."""
+    """Make sure pip is usable (subprocess or PyInstaller bundle)."""
+    if getattr(sys, "frozen", False):
+        try:
+            import pip._internal.cli.main  # noqa: F401
+            return True
+        except ImportError:
+            return False
     try:
         subprocess.check_call(
             [sys.executable, "-m", "pip", "--version"],
