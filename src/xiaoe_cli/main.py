@@ -1,42 +1,107 @@
 """CLI entry point."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
-from xiaoe_core.config import AppPaths, AppSettings
-from xiaoe_core.auth import XIAOE_LOGIN_URL, XiaoeCredentialStore, XiaoePasswordLogin
-from xiaoe_core.asr import AsrProvider
-from xiaoe_core.asr_registry import PROVIDER_SPECS, build_asr_provider as create_asr_provider, list_provider_specs
-from xiaoe_core.api import create_server
-from xiaoe_core.browser import BrowserError, ChromeManager, EdgeManager, inspect_page
-from xiaoe_core.database import Database
-from xiaoe_core.download_service import DownloadService
-from xiaoe_core.downloader import AudioDownloader
-from xiaoe_core.ego_browser import EgoBrowserManager
-from xiaoe_core.playwright_browser import PlaywrightBrowserManager
-from xiaoe_core.media import MediaSelector, StoredUrlResolver
-from xiaoe_core.pipeline import PipelineRunner
-from xiaoe_core.services import CourseService, LessonService
-from xiaoe_core.structure_service import StructureService
-from xiaoe_core.structurer import CodexCliStructurer
-from xiaoe_core.transcription_service import TranscriptionService
-from xiaoe_core.xiaoe import (
-    HybridMediaResolver,
-    XiaoeAccountCatalogService,
-    XiaoeBrowserMediaResolver,
-    XiaoeCatalogService,
-)
-from xiaoe_cli.course_picker import course_status_label
-
 
 DEFAULT_AUTH_URL = "https://study.xiaoe-tech.com"
 
 
+# Placeholders so mock.patch can target these names at module level.
+# Real values are assigned by _lazy_imports() at runtime.
+AppPaths = None  # type: ignore[assignment]
+AppSettings = None  # type: ignore[assignment]
+XIAOE_LOGIN_URL = None  # type: ignore[assignment]
+XiaoeCredentialStore = None  # type: ignore[assignment]
+XiaoePasswordLogin = None  # type: ignore[assignment]
+AsrProvider = None  # type: ignore[assignment]
+PROVIDER_SPECS = None  # type: ignore[assignment]
+create_asr_provider = None  # type: ignore[assignment]
+list_provider_specs = None  # type: ignore[assignment]
+create_server = None  # type: ignore[assignment]
+BrowserError = None  # type: ignore[assignment]
+ChromeManager = None  # type: ignore[assignment]
+EdgeManager = None  # type: ignore[assignment]
+inspect_page = None  # type: ignore[assignment]
+Database = None  # type: ignore[assignment]
+DownloadService = None  # type: ignore[assignment]
+AudioDownloader = None  # type: ignore[assignment]
+EgoBrowserManager = None  # type: ignore[assignment]
+PlaywrightBrowserManager = None  # type: ignore[assignment]
+MediaSelector = None  # type: ignore[assignment]
+StoredUrlResolver = None  # type: ignore[assignment]
+PipelineRunner = None  # type: ignore[assignment]
+CourseService = None  # type: ignore[assignment]
+LessonService = None  # type: ignore[assignment]
+StructureService = None  # type: ignore[assignment]
+CodexCliStructurer = None  # type: ignore[assignment]
+TranscriptionService = None  # type: ignore[assignment]
+HybridMediaResolver = None  # type: ignore[assignment]
+XiaoeAccountCatalogService = None  # type: ignore[assignment]
+XiaoeBrowserMediaResolver = None  # type: ignore[assignment]
+XiaoeCatalogService = None  # type: ignore[assignment]
+course_status_label = None  # type: ignore[assignment]
+
+
+def _lazy_imports() -> None:
+    """Trigger imports for heavy dependencies. Skips names already set (e.g. by tests)."""
+    _import_if_none("AppPaths", "xiaoe_core.config", "AppPaths")
+    _import_if_none("AppSettings", "xiaoe_core.config", "AppSettings")
+    _import_if_none("XIAOE_LOGIN_URL", "xiaoe_core.auth", "XIAOE_LOGIN_URL")
+    _import_if_none("XiaoeCredentialStore", "xiaoe_core.auth", "XiaoeCredentialStore")
+    _import_if_none("XiaoePasswordLogin", "xiaoe_core.auth", "XiaoePasswordLogin")
+    _import_if_none("AsrProvider", "xiaoe_core.asr", "AsrProvider")
+    _import_if_none("PROVIDER_SPECS", "xiaoe_core.asr_registry", "PROVIDER_SPECS")
+    _import_if_none("create_asr_provider", "xiaoe_core.asr_registry", "build_asr_provider",
+                    alias="create_asr_provider")
+    _import_if_none("list_provider_specs", "xiaoe_core.asr_registry", "list_provider_specs")
+    _import_if_none("create_server", "xiaoe_core.api", "create_server")
+    _import_if_none("BrowserError", "xiaoe_core.browser", "BrowserError")
+    _import_if_none("ChromeManager", "xiaoe_core.browser", "ChromeManager")
+    _import_if_none("EdgeManager", "xiaoe_core.browser", "EdgeManager")
+    _import_if_none("inspect_page", "xiaoe_core.browser", "inspect_page")
+    _import_if_none("Database", "xiaoe_core.database", "Database")
+    _import_if_none("DownloadService", "xiaoe_core.download_service", "DownloadService")
+    _import_if_none("AudioDownloader", "xiaoe_core.downloader", "AudioDownloader")
+    _import_if_none("EgoBrowserManager", "xiaoe_core.ego_browser", "EgoBrowserManager")
+    _import_if_none("PlaywrightBrowserManager", "xiaoe_core.playwright_browser", "PlaywrightBrowserManager")
+    _import_if_none("MediaSelector", "xiaoe_core.media", "MediaSelector")
+    _import_if_none("StoredUrlResolver", "xiaoe_core.media", "StoredUrlResolver")
+    _import_if_none("PipelineRunner", "xiaoe_core.pipeline", "PipelineRunner")
+    _import_if_none("CourseService", "xiaoe_core.services", "CourseService")
+    _import_if_none("LessonService", "xiaoe_core.services", "LessonService")
+    _import_if_none("StructureService", "xiaoe_core.structure_service", "StructureService")
+    _import_if_none("CodexCliStructurer", "xiaoe_core.structurer", "CodexCliStructurer")
+    _import_if_none("TranscriptionService", "xiaoe_core.transcription_service", "TranscriptionService")
+    _import_if_none("HybridMediaResolver", "xiaoe_core.xiaoe", "HybridMediaResolver")
+    _import_if_none("XiaoeAccountCatalogService", "xiaoe_core.xiaoe", "XiaoeAccountCatalogService")
+    _import_if_none("XiaoeBrowserMediaResolver", "xiaoe_core.xiaoe", "XiaoeBrowserMediaResolver")
+    _import_if_none("XiaoeCatalogService", "xiaoe_core.xiaoe", "XiaoeCatalogService")
+    _import_if_none("course_status_label", "xiaoe_cli.course_picker", "course_status_label")
+
+
+def _import_if_none(module_attr: str, module_path: str, import_name: str, alias: Optional[str] = None) -> None:
+    """Set globals()[module_attr] from an import only if it is currently None."""
+    if globals().get(module_attr) is not None:
+        return
+    mod = __import__(module_path, fromlist=[import_name])
+    value = getattr(mod, import_name)
+    target = alias or import_name
+    globals()[target] = value
+
+
+def _safe_provider_choices():
+    """Return ASR provider choices without crashing if deps are missing."""
+    return ["local", "dashscope", "openai", "groq", "deepgram", "volcengine", "tencent", "baidu", "custom"]
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="xiaoe", description="Local Xiaoe audio pipeline")
+    parser = argparse.ArgumentParser(prog="ecai", description="鹅采 — 小鹅通音频下载与转写工具")
     parser.add_argument("--data-dir", help="Runtime data directory; defaults to ~/.xiaoe-audio-pipeline")
     parser.add_argument(
         "--browser",
@@ -67,6 +132,9 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = subcommands.add_parser("status", help="Show pipeline status")
     status_parser.add_argument("--json", action="store_true", dest="as_json")
 
+    setup_parser = subcommands.add_parser("setup", help="First-run: detect location and install dependencies")
+    setup_parser.add_argument("--yes", "-y", action="store_true", help="Install all recommended deps without prompts")
+
     download_parser = subcommands.add_parser("download", help="Download lesson audio for a course")
     download_parser.add_argument("course_id")
     download_parser.add_argument("--lesson", dest="lesson_id")
@@ -79,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe_parser.add_argument("--lesson", dest="lesson_id")
     transcribe_parser.add_argument("--limit", type=int)
     transcribe_parser.add_argument("--positions", help="Lesson positions (same format as download)")
-    transcribe_parser.add_argument("--provider", choices=list(PROVIDER_SPECS))
+    transcribe_parser.add_argument("--provider", choices=_safe_provider_choices())
     transcribe_parser.add_argument("--model")
     transcribe_parser.add_argument("--language", help="Known language, for example zh or en")
     transcribe_parser.add_argument("--local-model-dir")
@@ -101,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--lesson", dest="lesson_id")
     run_parser.add_argument("--limit", type=int)
     run_parser.add_argument("--language")
-    run_parser.add_argument("--asr-provider", choices=list(PROVIDER_SPECS))
+    run_parser.add_argument("--asr-provider", choices=_safe_provider_choices())
     run_parser.add_argument("--asr-model")
     run_parser.add_argument("--local-model-dir")
     run_parser.add_argument("--local-runtime-python")
@@ -143,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     asr_current = asr_commands.add_parser("current", help="Show the selected ASR provider")
     asr_current.add_argument("--json", action="store_true", dest="as_json")
     asr_use = asr_commands.add_parser("use", help="Select an ASR provider without saving a secret")
-    asr_use.add_argument("provider", choices=list(PROVIDER_SPECS))
+    asr_use.add_argument("provider", choices=_safe_provider_choices())
     asr_use.add_argument("--model")
     asr_use.add_argument("--base-url")
     asr_use.add_argument("--json", action="store_true", dest="as_json")
@@ -290,6 +358,13 @@ def build_asr_provider(arguments: argparse.Namespace, paths: AppPaths, provider_
 
 
 def run(arguments: argparse.Namespace) -> int:
+    # Handle setup before importing heavy dependencies.
+    if arguments.command == "setup":
+        from xiaoe_cli.setup import run_setup
+        return run_setup(interactive=not getattr(arguments, "yes", False))
+
+    _lazy_imports()
+
     paths = AppPaths.resolve(arguments.data_dir)
     paths.create()
     service = CourseService(Database(paths.database_file))
