@@ -156,6 +156,16 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe_parser.add_argument("--force", action="store_true")
     transcribe_parser.add_argument("--json", action="store_true", dest="as_json")
 
+    tf_parser = subcommands.add_parser("transcribe-file", help="Transcribe a local audio file directly")
+    tf_parser.add_argument("audio_file", help="Path to the audio file to transcribe")
+    tf_parser.add_argument("--provider", choices=_safe_provider_choices())
+    tf_parser.add_argument("--model")
+    tf_parser.add_argument("--language", help="Known language, for example zh or en")
+    tf_parser.add_argument("--local-model-dir")
+    tf_parser.add_argument("--local-runtime-python")
+    tf_parser.add_argument("--local-device", choices=["auto", "mps", "cpu"], default="auto")
+    tf_parser.add_argument("--json", action="store_true", dest="as_json")
+
     structure_parser = subcommands.add_parser("structure", help="Turn transcripts into faithful Markdown notes")
     structure_parser.add_argument("course_id")
     structure_parser.add_argument("--lesson", dest="lesson_id")
@@ -651,6 +661,32 @@ def run(arguments: argparse.Namespace) -> int:
             for item in result.items:
                 print("{}\t{}\t{}".format(item.lesson_id, item.status, item.text_file or item.error or ""))
         return 1 if result.failed else 0
+
+    if arguments.command == "transcribe-file":
+        from xiaoe_core.transcription_service import AudioChunker
+        from xiaoe_core.asr import merge_chunk_results
+        audio_path = Path(arguments.audio_file)
+        if not audio_path.is_file():
+            print("错误：找不到音频文件 — {}".format(audio_path), file=sys.stderr)
+            return 2
+        provider = build_asr_provider(arguments, paths, arguments.provider)
+        chunk_seconds = int(getattr(provider, "chunk_seconds", 240))
+        chunk_format = str(getattr(provider, "chunk_format", "mp3"))
+        chunker = AudioChunker(chunk_seconds=chunk_seconds, output_format=chunk_format)
+        try:
+            chunks = chunker.split(audio_path, audio_path.parent / "ecai_chunks")
+            results = [provider.transcribe(chunk) for chunk in chunks]
+            offsets = [idx * float(chunk_seconds) for idx in range(len(chunks))]
+            merged = merge_chunk_results(results, offsets)
+        finally:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                close()
+        if arguments.as_json:
+            emit({"text": merged.text, "segments": [s.to_dict() for s in merged.segments]}, True)
+        else:
+            print(merged.text)
+        return 0
 
     if arguments.command == "structure":
         lessons = LessonService(service.database)

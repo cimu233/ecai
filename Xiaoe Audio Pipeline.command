@@ -53,15 +53,16 @@ while true; do
 —— 下载与处理 ——
  9. 下载课程音频
 10. 转写课程音频
-11. 试跑一节课（下载+转写+整理）
-12. 运行整门课程（下载+转写+整理）
+11. 转写本地音频文件
+12. 试跑一节课（下载+转写+整理）
+13. 运行整门课程（下载+转写+整理）
 
 —— 工具 ——
-13. 查看任务状态
-14. 配置语音转文字服务
-15. 检查本地 Qwen ASR
+14. 查看任务状态
+15. 配置语音转文字服务
+16. 检查本地 Qwen ASR
 
-16. 退出
+17. 退出
 ========================================
 MENU
   printf "请选择："
@@ -168,8 +169,23 @@ MENU
             echo ""
             if [[ -z "$positions" || "$positions" = "all" ]]; then
               run_xiaoe download "$course_id"
+              dl_positions=""
             else
               run_xiaoe download "$course_id" --positions "$positions"
+              dl_positions="$positions"
+            fi
+            dl_status=$?
+            if [[ "$dl_status" -eq 0 ]]; then
+              echo ""
+              printf "是否转写已下载的音频？(y/n)："
+              read -r tx_choice
+              if [[ "$tx_choice" = "y" || "$tx_choice" = "Y" ]]; then
+                if [[ -z "$dl_positions" ]]; then
+                  run_xiaoe transcribe "$course_id" --language zh
+                else
+                  run_xiaoe transcribe "$course_id" --positions "$dl_positions" --language zh
+                fi
+              fi
             fi
           fi
         fi
@@ -191,8 +207,23 @@ MENU
         echo ""
         if [[ -z "$positions" || "$positions" = "all" ]]; then
           run_xiaoe download "$course_id"
+          dl_positions=""
         else
           run_xiaoe download "$course_id" --positions "$positions"
+          dl_positions="$positions"
+        fi
+        dl_status=$?
+        if [[ "$dl_status" -eq 0 ]]; then
+          echo ""
+          printf "是否转写已下载的音频？(y/n)："
+          read -r tx_choice
+          if [[ "$tx_choice" = "y" || "$tx_choice" = "Y" ]]; then
+            if [[ -z "$dl_positions" ]]; then
+              run_xiaoe transcribe "$course_id" --language zh
+            else
+              run_xiaoe transcribe "$course_id" --positions "$dl_positions" --language zh
+            fi
+          fi
         fi
       fi
       pause_screen
@@ -219,28 +250,45 @@ MENU
       pause_screen
       ;;
     11)
-      course_id="$(select_course)"
-      if [[ -n "$course_id" ]]; then
-        run_xiaoe run "$course_id" --limit 1 --language zh
+      echo ""
+      echo "输入本地音频文件路径，直接转写为文字稿。"
+      printf "音频文件路径："
+      read -r audio_path
+      if [[ -n "$audio_path" && -f "$audio_path" ]]; then
+        echo ""
+        printf "语言（默认 zh，如英文则输入 en）："
+        read -r lang
+        if [[ -z "$lang" ]]; then lang="zh"; fi
+        echo ""
+        run_xiaoe transcribe-file "$audio_path" --language "$lang"
+      else
+        echo "文件不存在：$audio_path"
       fi
       pause_screen
       ;;
     12)
       course_id="$(select_course)"
       if [[ -n "$course_id" ]]; then
-        run_xiaoe run "$course_id" --language zh
+        run_xiaoe run "$course_id" --limit 1 --language zh
       fi
       pause_screen
       ;;
     13)
-      run_xiaoe status
+      course_id="$(select_course)"
+      if [[ -n "$course_id" ]]; then
+        run_xiaoe run "$course_id" --language zh
+      fi
       pause_screen
       ;;
     14)
-      "$python_bin" "$project_dir/scripts/configure_asr.py"
+      run_xiaoe status
       pause_screen
       ;;
     15)
+      "$python_bin" "$project_dir/scripts/configure_asr.py"
+      pause_screen
+      ;;
+    16)
       "$project_dir/.local-asr-venv/bin/python" - <<'PY'
 import torch
 from qwen_asr import Qwen3ASRModel
@@ -255,7 +303,7 @@ print("Qwen 运行时：", Qwen3ASRModel.__name__)
 PY
       pause_screen
       ;;
-    16)
+    17)
       exit 0
       ;;
     *)
