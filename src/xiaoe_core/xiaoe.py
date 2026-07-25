@@ -440,16 +440,20 @@ class XiaoeAccountCatalogService:
 
 
 class XiaoeBrowserMediaResolver:
-    def __init__(self, chrome: Any, wait_seconds: float = 8.0) -> None:
+    def __init__(self, chrome: Any, wait_seconds: float = 12.0) -> None:
         self.chrome = chrome
         self.wait_seconds = wait_seconds
 
     def resolve(self, lesson: Lesson, force_refresh: bool = False) -> List[MediaSource]:
-        del force_refresh
         if not lesson.source_url:
             raise DownloadError("source_unavailable", "Lesson has no Xiaoe page URL.")
+
+        # When force_refresh, wait longer — the first attempt may have
+        # raced against a slow-loading player widget.
+        wait = self.wait_seconds + (10.0 if force_refresh else 0.0)
+
         if hasattr(self.chrome, "capture_media"):
-            captured = self.chrome.capture_media(lesson.source_url, self._play_expression(), self.wait_seconds)
+            captured = self.chrome.capture_media(lesson.source_url, self._play_expression(), wait)
             state = captured["state"]
             events = captured["events"]
             cookies = captured["cookies"]
@@ -458,8 +462,10 @@ class XiaoeBrowserMediaResolver:
             page = self.chrome.open_page(endpoint, lesson.source_url)
             try:
                 state = inspect_page(page, 3.0, preserve_events=True)
-                page.command("Runtime.evaluate", {"expression": self._play_expression()})
-                events = page.collect_events(self.wait_seconds)
+                self._trigger_playback(page, wait)
+                # Events were already collected during inspect_page and
+                # _trigger_playback; a short grace period catches stragglers.
+                events = page.collect_events(2.0)
             finally:
                 page.close()
             cookies = self.chrome.cookies(endpoint)
@@ -470,15 +476,48 @@ class XiaoeBrowserMediaResolver:
             raise DownloadError("source_unavailable", "No playable audio or HLS request was observed.")
         return [self._source(url, lesson.source_url, cookies) for url in urls]
 
+    def _trigger_playback(self, page: Any, total_wait: float) -> None:
+        """Click play buttons in stages, waiting between attempts so the
+        page has time to render audio elements after a navigation or
+        lazy-loaded component mounts."""
+        import time
+
+        # Stage 1: immediate attempt — often catches already-visible players.
+        page.command("Runtime.evaluate", {"expression": self._play_expression()})
+        time.sleep(1.5)
+
+        # Stage 2: retry after a short settle.  Some Xiaoe pages load the
+        # player asynchronously after the initial React/Vue render.
+        page.command("Runtime.evaluate", {"expression": self._play_expression()})
+        time.sleep(1.5)
+
+        # Stage 3: final attempt after the bulk of the wait has passed,
+        # right before we collect events.
+        remaining = total_wait - 3.0
+        if remaining > 1.0:
+            time.sleep(remaining - 1.0)
+            page.command("Runtime.evaluate", {"expression": self._play_expression()})
+
     @staticmethod
     def _play_expression() -> str:
         return """(() => {
+          // Click every visible play button — Xiaoe uses several widget flavours.
+          const buttons = [...document.querySelectorAll('button,[role="button"],div[class*="play"],span[class*="play"],i[class*="play"]')];
+          let clicked = 0;
+          for (const btn of buttons) {
+            const text = (btn.innerText || btn.getAttribute('aria-label') || btn.title || '').toLowerCase();
+            const cls = (btn.className || '').toString().toLowerCase();
+            if (/播放|play|audio|video|start|begin/i.test(text + cls)) {
+              try { btn.click(); clicked += 1; } catch(e) {}
+            }
+          }
+          // Also try native media elements.
           const media = [...document.querySelectorAll('audio,video')];
-          media.forEach(node => node.play().catch(() => {}));
-          const button = [...document.querySelectorAll('button,[role="button"]')]
-            .find(node => /播放|play/i.test(node.innerText || node.getAttribute('aria-label') || ''));
-          if (button) button.click();
-          return media.length;
+          media.forEach(node => { try { node.play(); } catch(e) {} });
+          // Some pages hide the player until a wrapper is clicked.
+          const wrappers = [...document.querySelectorAll('[class*="player"],[class*="audio"],[class*="video"],[class*="sound"]')];
+          wrappers.forEach(node => { try { node.click(); } catch(e) {} });
+          return {media: media.length, buttons_clicked: clicked};
         })()"""
 
     @staticmethod

@@ -46,6 +46,9 @@ XiaoeAccountCatalogService = None  # type: ignore[assignment]
 XiaoeBrowserMediaResolver = None  # type: ignore[assignment]
 XiaoeCatalogService = None  # type: ignore[assignment]
 course_status_label = None  # type: ignore[assignment]
+display_lessons = None  # type: ignore[assignment]
+lesson_status_label = None  # type: ignore[assignment]
+pick_lesson_positions = None  # type: ignore[assignment]
 
 
 def _lazy_imports() -> None:
@@ -83,6 +86,9 @@ def _lazy_imports() -> None:
     _import_if_none("XiaoeBrowserMediaResolver", "xiaoe_core.xiaoe", "XiaoeBrowserMediaResolver")
     _import_if_none("XiaoeCatalogService", "xiaoe_core.xiaoe", "XiaoeCatalogService")
     _import_if_none("course_status_label", "xiaoe_cli.course_picker", "course_status_label")
+    _import_if_none("display_lessons", "xiaoe_cli.course_picker", "display_lessons")
+    _import_if_none("lesson_status_label", "xiaoe_cli.course_picker", "lesson_status_label")
+    _import_if_none("pick_lesson_positions", "xiaoe_cli.course_picker", "pick_lesson_positions")
 
 
 def _import_if_none(module_attr: str, module_path: str, import_name: str, alias: Optional[str] = None) -> None:
@@ -599,7 +605,19 @@ def run(arguments: argparse.Namespace) -> int:
         position_set = None
         if arguments.positions:
             position_set = parse_positions(arguments.positions)
+
+        course = service.get(arguments.course_id)
+        if course is None:
+            print("课程不存在：{}".format(arguments.course_id), file=sys.stderr)
+            return 1
+
         lessons = LessonService(service.database)
+
+        # Always show lesson list in human-readable mode so users know what's available.
+        if not arguments.as_json:
+            all_lessons = lessons.list_for_download(arguments.course_id)
+            display_lessons([lesson.to_dict() for lesson in all_lessons], sys.stdout)
+
         download_service = DownloadService(
             paths=paths,
             courses=service,
@@ -639,7 +657,19 @@ def run(arguments: argparse.Namespace) -> int:
         position_set = None
         if arguments.positions:
             position_set = parse_positions(arguments.positions)
+
+        course = service.get(arguments.course_id)
+        if course is None:
+            print("课程不存在：{}".format(arguments.course_id), file=sys.stderr)
+            return 1
+
         lessons = LessonService(service.database)
+
+        # Show lesson list in human-readable mode.
+        if not arguments.as_json:
+            all_lessons = lessons.list_for_download(arguments.course_id)
+            display_lessons([lesson.to_dict() for lesson in all_lessons], sys.stdout)
+
         provider = build_asr_provider(arguments, paths, arguments.provider)
         transcription = TranscriptionService(paths, service, lessons, provider)
         result = transcription.transcribe_course(

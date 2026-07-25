@@ -97,6 +97,7 @@ class AudioDownloader:
                 ),
                 end="",
                 file=sys.stderr,
+                flush=True,
             )
 
         if request.source.kind == "direct_audio":
@@ -129,6 +130,7 @@ class AudioDownloader:
                     self._progress_index, self._progress_total, request.lesson.title[:40], size_mb
                 ),
                 file=sys.stderr,
+                flush=True,
             )
 
         return DownloadResult(
@@ -276,6 +278,7 @@ class AudioDownloader:
                                 ),
                                 end="",
                                 file=sys.stderr,
+                                flush=True,
                             )
             process.wait(timeout=10800)
         except subprocess.TimeoutExpired:
@@ -289,7 +292,7 @@ class AudioDownloader:
                 if process.stdout is not None:
                     process.stdout.close()
             if self.show_progress:
-                print("\r" + " " * 60 + "\r", end="", file=sys.stderr)
+                print("\r" + " " * 60 + "\r", end="", file=sys.stderr, flush=True)
 
         stderr_tail = "".join(collected[-20:] if len(collected) > 20 else collected)
         return process.returncode == 0, stderr_tail
@@ -453,6 +456,7 @@ class AudioDownloader:
             ),
             end="",
             file=sys.stderr,
+            flush=True,
         )
 
     @staticmethod

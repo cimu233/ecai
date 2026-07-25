@@ -15,13 +15,67 @@ raise SystemExit(main(sys.argv[2:]))
 PY
 }
 
+select_course() {
+  "$python_bin" "$project_dir/scripts/select_course.py"
+}
+
+# Show lesson list for a course on /dev/tty (visible even when stdout is captured).
+show_lessons() {
+  local course_id="$1"
+  "$python_bin" "$project_dir/scripts/list_lessons.py" "$course_id"
+}
+
 pause_screen() {
   printf "\n按回车键返回主菜单..."
   read -r
 }
 
-select_course() {
-  "$python_bin" "$project_dir/scripts/select_course.py"
+# ── Unified position prompt ──
+# Always shows the lesson list first, then asks for positions.
+prompt_positions() {
+  local course_id="$1"
+  show_lessons "$course_id"
+  echo ""
+  echo "选择范围（与上方序号一致）："
+  echo "  all / 回车   — 全部"
+  echo "  88           — 仅第 88 节"
+  echo "  88-93        — 第 88 至 93 节"
+  echo "  1,5,10       — 第 1、5、10 节"
+  echo "  88-93,1,5   — 混合"
+  printf "请输入："
+  read -r positions
+  echo ""
+}
+
+# ── Unified download → transcribe flow ──
+# Used by both option 8 (scan→download) and option 9 (download) so every
+# entry point follows the exact same path.
+download_flow() {
+  local course_id="$1"
+
+  prompt_positions "$course_id"
+
+  if [[ -z "$positions" || "$positions" = "all" ]]; then
+    run_xiaoe download "$course_id"
+    dl_positions=""
+  else
+    run_xiaoe download "$course_id" --positions "$positions"
+    dl_positions="$positions"
+  fi
+  local dl_status=$?
+
+  if [[ "$dl_status" -eq 0 ]]; then
+    echo ""
+    printf "是否转写已下载的音频？(y/n)："
+    read -r tx_choice
+    if [[ "$tx_choice" = "y" || "$tx_choice" = "Y" ]]; then
+      if [[ -z "$dl_positions" ]]; then
+        run_xiaoe transcribe "$course_id" --language zh
+      else
+        run_xiaoe transcribe "$course_id" --positions "$dl_positions" --language zh
+      fi
+    fi
+  fi
 }
 
 if [[ ! -d "$project_dir/src/xiaoe_cli" ]]; then
@@ -48,9 +102,7 @@ while true; do
  5. 导入账号全部课程
  6. 手动添加课程
  7. 查看课程列表
- 8. 扫描课程目录
-
-—— 下载与处理 ——
+ 8. 扫描课程目录（可继续下载）
  9. 下载课程音频
 10. 转写课程音频
 11. 转写本地音频文件
@@ -148,6 +200,7 @@ MENU
       pause_screen
       ;;
     8)
+      # Scan catalog → unified download flow
       course_id="$(select_course)"
       if [[ -n "$course_id" ]]; then
         run_xiaoe course refresh "$course_id"
@@ -157,90 +210,26 @@ MENU
           printf "是否下载该课程音频？(y/n)："
           read -r download_choice
           if [[ "$download_choice" = "y" || "$download_choice" = "Y" ]]; then
-            echo ""
-            echo "下载范围（默认全部）："
-            echo "  all          — 全部下载"
-            echo "  88           — 仅第 88 节"
-            echo "  88-93        — 第 88 至 93 节"
-            echo "  1,5,10       — 第 1、5、10 节"
-            echo "  88-93,1,5   — 混合"
-            printf "请输入："
-            read -r positions
-            echo ""
-            if [[ -z "$positions" || "$positions" = "all" ]]; then
-              run_xiaoe download "$course_id"
-              dl_positions=""
-            else
-              run_xiaoe download "$course_id" --positions "$positions"
-              dl_positions="$positions"
-            fi
-            dl_status=$?
-            if [[ "$dl_status" -eq 0 ]]; then
-              echo ""
-              printf "是否转写已下载的音频？(y/n)："
-              read -r tx_choice
-              if [[ "$tx_choice" = "y" || "$tx_choice" = "Y" ]]; then
-                if [[ -z "$dl_positions" ]]; then
-                  run_xiaoe transcribe "$course_id" --language zh
-                else
-                  run_xiaoe transcribe "$course_id" --positions "$dl_positions" --language zh
-                fi
-              fi
-            fi
+            download_flow "$course_id"
           fi
         fi
       fi
       pause_screen
       ;;
     9)
+      # Direct download — unified flow
       course_id="$(select_course)"
       if [[ -n "$course_id" ]]; then
-        echo ""
-        echo "下载范围（默认全部）："
-        echo "  all / 回车   — 全部下载"
-        echo "  88           — 仅第 88 节"
-        echo "  88-93        — 第 88 至 93 节"
-        echo "  1,5,10       — 第 1、5、10 节"
-        echo "  88-93,1,5   — 混合"
-        printf "请输入："
-        read -r positions
-        echo ""
-        if [[ -z "$positions" || "$positions" = "all" ]]; then
-          run_xiaoe download "$course_id"
-          dl_positions=""
-        else
-          run_xiaoe download "$course_id" --positions "$positions"
-          dl_positions="$positions"
-        fi
-        dl_status=$?
-        if [[ "$dl_status" -eq 0 ]]; then
-          echo ""
-          printf "是否转写已下载的音频？(y/n)："
-          read -r tx_choice
-          if [[ "$tx_choice" = "y" || "$tx_choice" = "Y" ]]; then
-            if [[ -z "$dl_positions" ]]; then
-              run_xiaoe transcribe "$course_id" --language zh
-            else
-              run_xiaoe transcribe "$course_id" --positions "$dl_positions" --language zh
-            fi
-          fi
-        fi
+        # If catalog not yet scanned, do it first.
+        run_xiaoe course refresh "$course_id"
+        download_flow "$course_id"
       fi
       pause_screen
       ;;
     10)
       course_id="$(select_course)"
       if [[ -n "$course_id" ]]; then
-        echo ""
-        echo "转写范围（默认全部）："
-        echo "  all / 回车   — 全部转写"
-        echo "  88           — 仅第 88 节"
-        echo "  88-93        — 第 88 至 93 节"
-        echo "  1,5,10       — 第 1、5、10 节"
-        echo "  88-93,1,5   — 混合"
-        printf "请输入："
-        read -r positions
-        echo ""
+        prompt_positions "$course_id"
         if [[ -z "$positions" || "$positions" = "all" ]]; then
           run_xiaoe transcribe "$course_id" --language zh
         else
