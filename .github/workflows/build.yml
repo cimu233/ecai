@@ -103,11 +103,12 @@ jobs:
           echo "pw_root=$root" >> $env:GITHUB_OUTPUT
 
       - name: Bundle everything
+        shell: pwsh
         run: |
-          mkdir ecai-full -Force
+          New-Item -ItemType Directory -Path ecai-full -Force | Out-Null
           Copy-Item "dist\ecai.exe" "ecai-full\"
-          Remove-Item "ecai-full\playwright-browsers" -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force "${{ steps.pw.outputs.pw_root }}\*" "ecai-full\playwright-browsers\"
+          robocopy "${{ steps.pw.outputs.pw_root }}" "ecai-full\playwright-browsers" /E /NFL /NDL /NJH /NJS /NC /NS /NP
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
           Compress-Archive -Path "ecai-full\*" -DestinationPath "ecai-full.zip"
 
       - uses: actions/upload-artifact@v4
