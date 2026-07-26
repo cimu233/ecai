@@ -105,11 +105,24 @@ jobs:
       - name: Bundle everything
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path ecai-full -Force | Out-Null
-          Copy-Item "dist\ecai.exe" "ecai-full\"
-          robocopy "${{ steps.pw.outputs.pw_root }}" "ecai-full\playwright-browsers" /E /NFL /NDL /NJH /NJS /NC /NS /NP
+          $bundle = "ecai-full"
+          $browsers = Join-Path $bundle "playwright-browsers"
+
+          Remove-Item $bundle -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $browsers -Force | Out-Null
+          Copy-Item -LiteralPath "dist\ecai.exe" -Destination $bundle -Force
+
+          robocopy "${{ steps.pw.outputs.pw_root }}" $browsers /E /NFL /NDL /NJH /NJS /NC /NS /NP
           if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
-          Compress-Archive -Path "ecai-full\*" -DestinationPath "ecai-full.zip"
+          $global:LASTEXITCODE = 0
+
+          $chromium = Get-ChildItem -LiteralPath $browsers -Recurse -Filter "chrome.exe" |
+            Select-Object -First 1
+          if (-not $chromium) {
+            throw "Bundled Playwright Chromium executable was not found."
+          }
+
+          Compress-Archive -Path "$bundle\*" -DestinationPath "ecai-full.zip" -Force
           exit 0
 
       - uses: actions/upload-artifact@v4

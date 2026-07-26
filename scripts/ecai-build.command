@@ -7,7 +7,11 @@
 set -e
 
 SCRIPT_DIR="${0:A:h}"
-PROJECT_DIR="$SCRIPT_DIR/xiaoe-audio-pipeline"
+if [[ -d "$SCRIPT_DIR/../src/xiaoe_core" ]]; then
+  PROJECT_DIR="${SCRIPT_DIR:h}"
+else
+  PROJECT_DIR="$SCRIPT_DIR/xiaoe-audio-pipeline"
+fi
 
 # ---- helpers ----
 
