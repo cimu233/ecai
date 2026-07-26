@@ -107,23 +107,20 @@ xiaoe-audio-pipeline/
 ## 四、当前 Git 状态（重要！）
 
 ```
-分支: main (领先 origin/main 1 个提交)
+分支: main（已与 origin/main 同步）
 远程: https://github.com/cimu233/ecai.git
 
 本地提交（从新到旧）：
-  701825c fix: remove NSIS, use portable zip packaging     ← 未推送！
-  72634c8 feat: add transcribe-file + transcribe prompt     ← 已推送
-  1933589 feat: dual-version build workflow                 ← 已推送
-  88d1694 chore: add ecai-build.command                    ← 已推送
-  c9959ce feat: add ecai setup command                      ← 已推送
-  00a6abf feat: add GitHub Actions Windows installer        ← 已推送
+  c487eb6 fix: allow release asset uploads
+  79924c8 fix: validate full Playwright bundle packaging
+  3653002 fix: exit 0 after robocopy
+  05bf5e1 fix: robocopy for playwright bundling
 
 标签:
-  v0.1.0 — 本地存在，指向 72634c8（含 NSIS 的版本，构建已失败）
-          GitHub 上 v0.1.0 同样指向含 NSIS 的失败构建
+  v0.1.6 — 指向 c487eb6，Windows 构建及 GitHub Release 均成功
 ```
 
-**核心问题**：提交 `701825c` (fix: remove NSIS, use portable zip packaging) 在本地但未推送。v0.1.0 标签指向的是含 NSIS 的旧提交，GitHub Actions 构建已失败。
+`v0.1.6` 是当前可用发布版本。
 
 ---
 
@@ -142,64 +139,29 @@ xiaoe-audio-pipeline/
 2. **build-full**：Windows runner → pip install 全部依赖 → PyInstaller onefile + ffmpeg + playwright chromium → zip
 3. **release**（仅 tag 推送触发）：下载两个 job 产物 → `action-gh-release` 上传
 
-### 5.3 上次失败原因
+### 5.3 已解决的构建问题
 
-`v0.1.0` 构建失败是因为 workflow 中使用了 NSIS 制作 `.exe` 安装程序，但 `makensis.exe` 不在 GitHub Actions 的 `windows-latest` 镜像中。
-
-**已在本地修复**（提交 `701825c`）：移除 NSIS，改用 PowerShell 内置的 `Compress-Archive` 打包为 zip。
+- NSIS 不存在：移除 NSIS，改用 `Compress-Archive` 生成 zip。
+- Playwright Chromium 复制冲突：改用 `robocopy` 复制目录树。
+- `robocopy` 成功状态被误判：接受小于 8 的退出码，并重置 PowerShell 退出状态。
+- 不完整的 full 包：打包前递归确认 `chrome.exe` 已存在。
+- Release 上传无权限：为 release job 增加 `contents: write`。
 
 ---
 
-## 六、你需要做的事情
+## 六、发布结果
 
-### 步骤 1：推送修复提交
+GitHub Actions 运行 `30198943771` 已通过：
 
-```bash
-cd "/Users/cimu_lumi/Desktop/【項目】小工具/xiaoe-tools/xiaoe-audio-pipeline"
-git -c http.proxy= -c https.proxy= push origin main
-```
+- `build-lite`：成功
+- `build-full`：成功
+- `release`：成功
 
-（`-c http.proxy=` 是为了绕过可能存在的本地代理）
-
-### 步骤 2：处理标签
-
-**方案 A（推荐）— 删除旧标签重建**：
-```bash
-# 删除本地标签
-git tag -d v0.1.0
-# 删除远程标签
-git -c http.proxy= -c https.proxy= push origin :refs/tags/v0.1.0
-# 在当前最新提交上重建标签
-git tag -a v0.1.0 -m "Release v0.1.0"
-# 推送新标签（触发构建）
-git -c http.proxy= -c https.proxy= push origin v0.1.0
-```
-
-**方案 B — 新建 v0.1.1**：
-```bash
-git tag -a v0.1.1 -m "Release v0.1.1"
-git -c http.proxy= -c https.proxy= push origin v0.1.1
-```
-
-### 步骤 3：监控构建
-
-推送标签后，GitHub Actions 自动触发。监控方式：
-
-```bash
-# 方式 1：CLI 监控
-gh run list --workflow=build.yml --limit 1
-gh run watch <RUN_ID>
-
-# 方式 2：使用构建脚本
-cd ~/Desktop/小工具/xiaoe-tools
-./ecai-build.command v0.1.0
-```
-
-### 步骤 4：验证产物
-
-构建成功后，在 [Releases 页面](https://github.com/cimu233/ecai/releases) 应该能看到：
+[v0.1.6 Releases 页面](https://github.com/cimu233/ecai/releases/tag/v0.1.6)包含：
 - `ecai-lite.zip` — 包含 `ecai.exe`
 - `ecai-full.zip` — 包含 `ecai.exe` + `playwright-browsers/`
+
+以后发布新版本时，在最新 `main` 上创建新标签并推送即可触发同一流程。
 
 ---
 
