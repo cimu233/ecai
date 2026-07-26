@@ -110,6 +110,7 @@ jobs:
           robocopy "${{ steps.pw.outputs.pw_root }}" "ecai-full\playwright-browsers" /E /NFL /NDL /NJH /NJS /NC /NS /NP
           if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
           Compress-Archive -Path "ecai-full\*" -DestinationPath "ecai-full.zip"
+          exit 0
 
       - uses: actions/upload-artifact@v4
         with: { name: ecai-full, path: ecai-full.zip }
