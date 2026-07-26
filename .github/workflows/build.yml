@@ -106,7 +106,8 @@ jobs:
         run: |
           mkdir ecai-full -Force
           Copy-Item "dist\ecai.exe" "ecai-full\"
-          Copy-Item -Recurse "${{ steps.pw.outputs.pw_root }}\*" "ecai-full\playwright-browsers\"
+          Remove-Item "ecai-full\playwright-browsers" -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "${{ steps.pw.outputs.pw_root }}\*" "ecai-full\playwright-browsers\"
           Compress-Archive -Path "ecai-full\*" -DestinationPath "ecai-full.zip"
 
       - uses: actions/upload-artifact@v4
