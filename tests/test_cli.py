@@ -125,7 +125,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(DEFAULT_AUTH_URL, resolve_auth_check_url(service, None))
         saved = "https://school.example.com/course/saved"
         service.add_course(saved, "Saved")
-        self.assertEqual(saved, resolve_auth_check_url(service, None))
+        self.assertEqual(DEFAULT_AUTH_URL, resolve_auth_check_url(service, None))
         explicit = "https://school.example.com/course/explicit"
         self.assertEqual(explicit, resolve_auth_check_url(service, explicit))
 

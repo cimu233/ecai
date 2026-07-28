@@ -300,12 +300,23 @@ def cookie_header(cookies: List[Dict[str, Any]], host: str) -> str:
     return "; ".join(matching)
 
 
-def classify_xiaoe_page(url: str, body_text: str) -> str:
+def classify_xiaoe_page(url: str, body_text: str, has_login_challenge: bool = False) -> str:
     lowered_url = url.lower()
     compact = " ".join(body_text.split())
     if any(marker in lowered_url for marker in ("/login", "passport", "account.xiaoe", "#/acount", "#/account")):
         return "login_required"
-    if any(marker in compact for marker in ("微信扫码登录", "手机号登录", "验证码登录", "密码登录")):
+    login_markers = (
+        "微信扫码登录",
+        "手机号登录",
+        "验证码登录",
+        "密码登录",
+        "登录/注册",
+        "请先登录",
+        "登录后观看",
+        "扫码观看",
+        "微信扫一扫",
+    )
+    if has_login_challenge or any(marker in compact for marker in login_markers):
         return "login_required"
     if any(marker in compact for marker in ("无权访问", "暂无权限", "课程已下架")):
         return "access_denied"
@@ -316,9 +327,20 @@ def inspect_page(page: CdpClient, wait_seconds: float = 3.0, preserve_events: bo
     events = page.collect_events(wait_seconds)
     if preserve_events:
         page.events.extend(events)
-    expression = "JSON.stringify({url: location.href, title: document.title, body: (document.body && document.body.innerText || '').slice(0, 12000)})"
+    expression = """JSON.stringify({
+      url: location.href,
+      title: document.title,
+      body: (document.body && document.body.innerText || '').slice(0, 12000),
+      loginChallenge: !!document.querySelector(
+        '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
+      )
+    })"""
     result = page.command("Runtime.evaluate", {"expression": expression, "returnByValue": True})
     value = result.get("result", {}).get("value", "{}")
     state = json.loads(value)
-    state["status"] = classify_xiaoe_page(state.get("url", ""), state.get("body", ""))
+    state["status"] = classify_xiaoe_page(
+        state.get("url", ""),
+        state.get("body", ""),
+        bool(state.get("loginChallenge")),
+    )
     return state

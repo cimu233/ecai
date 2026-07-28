@@ -237,13 +237,20 @@ cliLog({marker} + JSON.stringify({{"taskId": task.id}}))
 const state = await js(String.raw`({{
   url: location.href,
   title: document.title,
-  body: (document.body && document.body.innerText || '').slice(0, 12000)
+  body: (document.body && document.body.innerText || '').slice(0, 12000),
+  loginChallenge: !!document.querySelector(
+    '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
+  )
 }})`)
 await closeTab(tab.targetId)
 cliLog({marker} + JSON.stringify(state))
 """.format(marker=json.dumps(EGO_MARKER))
         state = self.cli.run(script)
-        state["status"] = classify_xiaoe_page(state.get("url", ""), state.get("body", ""))
+        state["status"] = classify_xiaoe_page(
+            state.get("url", ""),
+            state.get("body", ""),
+            bool(state.get("loginChallenge")),
+        )
         return state
 
     def capture_catalog(self, url: str, expression: str, wait_seconds: float = 6.0) -> Dict[str, Any]:
@@ -251,7 +258,10 @@ cliLog({marker} + JSON.stringify(state))
 const state = await js(String.raw`({{
   url: location.href,
   title: document.title,
-  body: (document.body && document.body.innerText || '').slice(0, 12000)
+  body: (document.body && document.body.innerText || '').slice(0, 12000),
+  loginChallenge: !!document.querySelector(
+    '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
+  )
 }})`)
 await js({expression})
 await wait({wait_seconds})
@@ -279,7 +289,11 @@ cliLog({marker} + JSON.stringify({{state, payloads}}))
         )
         value = self.cli.run(script, timeout=max(60.0, wait_seconds + 40.0))
         state = value.get("state", {})
-        state["status"] = classify_xiaoe_page(state.get("url", ""), state.get("body", ""))
+        state["status"] = classify_xiaoe_page(
+            state.get("url", ""),
+            state.get("body", ""),
+            bool(state.get("loginChallenge")),
+        )
         return {"state": state, "payloads": value.get("payloads", [])}
 
     def capture_account_courses(self, origin: str) -> Dict[str, Any]:
@@ -288,7 +302,10 @@ cliLog({marker} + JSON.stringify({{state, payloads}}))
 const state = await js(String.raw`({{
   url: location.href,
   title: document.title,
-  body: (document.body && document.body.innerText || '').slice(0, 12000)
+  body: (document.body && document.body.innerText || '').slice(0, 12000),
+  loginChallenge: !!document.querySelector(
+    '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
+  )
 }})`)
 const rows = await js(String.raw`(async () => {{
   const collected = []
@@ -318,7 +335,11 @@ cliLog({marker} + JSON.stringify({{state, rows}}))
 """.format(marker=json.dumps(EGO_MARKER))
         value = self.cli.run(script, timeout=90.0)
         state = value.get("state", {})
-        state["status"] = classify_xiaoe_page(state.get("url", ""), state.get("body", ""))
+        state["status"] = classify_xiaoe_page(
+            state.get("url", ""),
+            state.get("body", ""),
+            bool(state.get("loginChallenge")),
+        )
         return {"state": state, "rows": value.get("rows", [])}
 
     def capture_media(self, url: str, expression: str, wait_seconds: float) -> Dict[str, Any]:
@@ -326,7 +347,10 @@ cliLog({marker} + JSON.stringify({{state, rows}}))
 const state = await js(String.raw`({{
   url: location.href,
   title: document.title,
-  body: (document.body && document.body.innerText || '').slice(0, 12000)
+  body: (document.body && document.body.innerText || '').slice(0, 12000),
+  loginChallenge: !!document.querySelector(
+    '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
+  )
 }})`)
 await js({expression})
 await wait({wait_seconds})
@@ -390,7 +414,11 @@ cliLog({marker} + JSON.stringify({{
         )
         value = self.cli.run(script, timeout=max(60.0, wait_seconds + 40.0))
         state = value.get("state", {})
-        state["status"] = classify_xiaoe_page(state.get("url", ""), state.get("body", ""))
+        state["status"] = classify_xiaoe_page(
+            state.get("url", ""),
+            state.get("body", ""),
+            bool(state.get("loginChallenge")),
+        )
         return {
             "state": state,
             "events": value.get("events", []),

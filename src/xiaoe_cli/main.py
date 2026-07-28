@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 
-DEFAULT_AUTH_URL = "https://study.xiaoe-tech.com"
+DEFAULT_AUTH_URL = "https://study.xiaoe-tech.com/#/acount"
 
 
 # Placeholders so mock.patch can target these names at module level.
@@ -327,8 +327,7 @@ def emit_pipeline_result(result: Any, as_json: bool) -> None:
 def resolve_auth_check_url(service: CourseService, requested_url: Optional[str]) -> str:
     if requested_url:
         return requested_url
-    courses = service.list_courses()
-    return courses[0].source_url if courses else DEFAULT_AUTH_URL
+    return DEFAULT_AUTH_URL
 
 
 def inspect_saved_session(chrome: Any, url: str) -> dict:
@@ -790,6 +789,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     try:
         return run(parser.parse_args(argv))
-    except (ValueError, RuntimeError, BrowserError) as error:
+    except (ValueError, RuntimeError) as error:
         print("error: {}".format(error), file=sys.stderr)
         return 2

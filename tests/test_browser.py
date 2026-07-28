@@ -18,6 +18,12 @@ class BrowserHelpersTest(unittest.TestCase):
     def test_authorized_course_page_is_accepted(self):
         self.assertEqual("authenticated", classify_xiaoe_page("https://study.xiaoe-tech.com/course", "课程目录"))
 
+    def test_visible_qrcode_on_course_page_requires_login(self):
+        self.assertEqual(
+            "login_required",
+            classify_xiaoe_page("https://example.com/course", "课程介绍", has_login_challenge=True),
+        )
+
     def test_cookie_header_only_contains_matching_domains(self):
         cookies = [
             {"name": "session", "value": "one", "domain": ".xiaoe-tech.com"},
