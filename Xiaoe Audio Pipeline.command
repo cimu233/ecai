@@ -134,8 +134,8 @@ MENU
       auth_status=$?
       if [[ "$auth_status" -eq 3 ]]; then
         credential_file="$HOME/.xiaoe-audio-pipeline/xiaoe-login.json"
-        echo "未找到完整登录凭据，正在打开本地私密配置文件..."
-        /usr/bin/open -a TextEdit "$credential_file"
+        echo "未找到完整登录凭据。程序不会切换窗口。"
+        echo "请在方便时自行打开：$credential_file"
       fi
       pause_screen
       ;;
@@ -145,8 +145,8 @@ MENU
       auth_status=$?
       if [[ "$auth_status" -eq 3 ]]; then
         credential_file="$HOME/.xiaoe-audio-pipeline/xiaoe-login.json"
-        echo "未找到完整登录凭据，正在打开本地私密配置文件..."
-        /usr/bin/open -a TextEdit "$credential_file"
+        echo "未找到完整登录凭据。程序不会切换窗口。"
+        echo "请在方便时自行打开：$credential_file"
       fi
       pause_screen
       ;;

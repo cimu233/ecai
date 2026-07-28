@@ -149,6 +149,8 @@ class PlaywrightBrowserManager:
         self._context: Any = None
 
     def ensure_running(self, visible: bool = False, initial_url: str = "about:blank") -> str:
+        # Keep all automated browser work off the user's desktop.
+        visible = False
         if self._browser is not None and self._context is not None:
             try:
                 self._context.pages

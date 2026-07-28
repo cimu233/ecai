@@ -2,7 +2,6 @@
 """Configure Xiaoe login credentials without exposing passwords in shell history."""
 
 import getpass
-import subprocess
 import sys
 from pathlib import Path
 
@@ -19,7 +18,7 @@ def main() -> int:
     store = XiaoeCredentialStore(paths)
     print("\n小鹅通登录凭据：")
     print("1. 保存到 macOS 钥匙圈（推荐）")
-    print("2. 打开本地私密配置文件")
+    print("2. 显示本地私密配置文件路径")
     print("q. 返回")
     choice = input("请选择：").strip().lower()
     if choice == "q":
@@ -32,8 +31,7 @@ def main() -> int:
         return 0
     if choice == "2":
         path = store.ensure_file_template()
-        subprocess.run(["/usr/bin/open", "-a", "TextEdit", str(path)], check=False)
-        print("请填写 username 和 password，然后保存文件：{}".format(path))
+        print("程序不会切换窗口。请在方便时自行打开并填写：{}".format(path))
         return 0
     print("选择无效。")
     return 2

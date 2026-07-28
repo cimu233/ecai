@@ -278,15 +278,14 @@ def emit_auth(payload: dict, as_json: bool) -> None:
             print("验证页面：{}".format(payload["title"]))
     elif action == "manual_verification_required":
         if payload.get("challenge") == "slider":
-            print("账号密码已经提交，请在浏览器中手动完成滑块验证。")
-            if payload.get("handed_off"):
-                print("Ego 已保留当前验证页面并交给你操作，完成后重新检查登录状态。")
+            print("账号密码已经提交，但滑块需要手动完成。")
         else:
-            print("账号密码已经提交，需要在可见浏览器中完成验证码或安全验证。")
+            print("账号密码已经提交，需要手动完成验证码或安全验证。")
+        print("程序不会切换窗口。请在方便时自行打开：{}".format(payload.get("manual_login_url") or XIAOE_LOGIN_URL))
     elif status == "access_denied":
         print("当前账号无权访问检查页面。")
     elif status == "running":
-        print("{} 登录窗口已打开。".format(browser or "浏览器"))
+        print("{} 后台登录会话已准备，不会切换窗口。".format(browser or "浏览器"))
     elif status == "stopped":
         print("浏览器自动化会话已停止。")
     else:
@@ -442,9 +441,9 @@ def run(arguments: argparse.Namespace) -> int:
             return 0
         chrome = build_browser_manager(arguments, paths)
         if arguments.auth_command == "start":
-            endpoint = chrome.ensure_running(visible=True, initial_url=arguments.url)
+            endpoint = chrome.ensure_running(visible=False, initial_url=arguments.url)
             emit_auth(
-                {"status": "running", "browser": chrome.browser_name, "mode": "visible", "endpoint": endpoint},
+                {"status": "running", "browser": chrome.browser_name, "mode": "background", "endpoint": endpoint},
                 arguments.as_json,
             )
             return 0
@@ -463,14 +462,15 @@ def run(arguments: argparse.Namespace) -> int:
                 return 3
             attempt = XiaoePasswordLogin(chrome).attempt(credentials)
             check_url = XIAOE_SESSION_CHECK_URL
-            if attempt.get("challenge") and attempt.get("handed_off"):
+            if attempt.get("challenge"):
                 emit_auth(
                     {
                         "status": "login_required",
                         "browser": chrome.browser_name,
                         "login": "manual_verification_required",
                         "challenge": attempt["challenge"],
-                        "handed_off": True,
+                        "handed_off": False,
+                        "manual_login_url": attempt.get("manual_login_url") or XIAOE_LOGIN_URL,
                     },
                     arguments.as_json,
                 )
@@ -489,9 +489,8 @@ def run(arguments: argparse.Namespace) -> int:
                 payload["login"] = "completed"
                 emit_auth(payload, arguments.as_json)
                 return 0
-            chrome.stop()
-            chrome.ensure_running(visible=True, initial_url=XIAOE_LOGIN_URL)
             payload["login"] = "manual_verification_required"
+            payload["manual_login_url"] = XIAOE_LOGIN_URL
             emit_auth(payload, arguments.as_json)
             return 1
         if arguments.auth_command == "stop":
@@ -517,10 +516,11 @@ def run(arguments: argparse.Namespace) -> int:
             attempt = XiaoePasswordLogin(chrome).attempt(credentials)
             payload["credential_source"] = credential_source
             payload["login_submitted"] = bool(attempt.get("submitted"))
-            if attempt.get("challenge") and attempt.get("handed_off"):
+            if attempt.get("challenge"):
                 payload["recovery"] = "manual_verification_required"
                 payload["challenge"] = attempt["challenge"]
-                payload["handed_off"] = True
+                payload["handed_off"] = False
+                payload["manual_login_url"] = attempt.get("manual_login_url") or XIAOE_LOGIN_URL
                 emit_auth(payload, arguments.as_json)
                 return 1
             verified = inspect_saved_session(chrome, check_url)
@@ -535,9 +535,8 @@ def run(arguments: argparse.Namespace) -> int:
                 payload["recovery"] = "automatic_login_completed"
                 emit_auth(payload, arguments.as_json)
                 return 0
-            chrome.stop()
-            chrome.ensure_running(visible=True, initial_url=XIAOE_LOGIN_URL)
             payload["recovery"] = "manual_verification_required"
+            payload["manual_login_url"] = XIAOE_LOGIN_URL
         emit_auth(payload, arguments.as_json)
         return 0 if state["status"] == "authenticated" else 1
 

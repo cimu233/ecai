@@ -185,13 +185,6 @@ cliLog({marker} + JSON.stringify({{"closed": true}}))
         except BrowserError:
             pass
 
-    def handoff(self) -> None:
-        script = self._prefix() + """
-await handOffTaskSpace({task_id})
-cliLog({marker} + JSON.stringify({{"handedOff": true}}))
-""".format(task_id=self.task_id, marker=json.dumps(EGO_MARKER))
-        self.cli.run(script)
-
     def _prefix(self) -> str:
         return """
 await useOrCreateTaskSpace({task_id})
@@ -214,19 +207,11 @@ class EgoBrowserManager:
         return self.cli.ensure_browser_running()
 
     def ensure_running(self, visible: bool = False, initial_url: str = "about:blank") -> str:
-        action = ""
-        if visible:
-            action = """
-await openOrReuseTab({url}, {{wait: true, timeout: 20}})
-await handOffTaskSpace(task.id)
-""".format(url=json.dumps(initial_url))
         script = """
 const task = await useOrCreateTaskSpace({task_name})
-{action}
 cliLog({marker} + JSON.stringify({{"taskId": task.id}}))
 """.format(
             task_name=json.dumps(self.task_name),
-            action=action,
             marker=json.dumps(EGO_MARKER),
         )
         value = self.cli.run(script)

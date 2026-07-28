@@ -44,7 +44,7 @@ class BrowserHelpersTest(unittest.TestCase):
         self.assertEqual("session=one", cookie_header(cookies, "study.xiaoe-tech.com"))
 
     def test_requested_mode_names_match_chrome_modes(self):
-        self.assertEqual("visible", ChromeManager.requested_mode(True))
+        self.assertEqual("headless", ChromeManager.requested_mode(True))
         self.assertEqual("headless", ChromeManager.requested_mode(False))
 
     def test_chrome_and_edge_share_the_chromium_manager_contract(self):

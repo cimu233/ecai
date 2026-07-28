@@ -175,6 +175,43 @@ class CliTest(unittest.TestCase):
         self.assertEqual("credentials_required", payload["status"])
         self.assertEqual("edge", payload["browser"])
 
+    def test_auth_start_prepares_a_background_session(self) -> None:
+        browser = mock.Mock()
+        browser.browser_name = "ego"
+        browser.ensure_running.return_value = "9"
+        with mock.patch("xiaoe_cli.main.build_browser_manager", return_value=browser):
+            exit_code, output, errors = self.invoke(["auth", "start", "--json"])
+        self.assertEqual(0, exit_code, errors)
+        payload = json.loads(output)
+        self.assertEqual("background", payload["mode"])
+        browser.ensure_running.assert_called_once_with(
+            visible=False,
+            initial_url="https://study.xiaoe-tech.com",
+        )
+
+    def test_slider_verification_never_hands_off_or_checks_an_incomplete_login(self) -> None:
+        browser = mock.Mock()
+        browser.browser_name = "ego"
+        credential_store = mock.Mock()
+        credential_store.load.return_value = (XiaoeCredentials("user", "password"), "keychain")
+        login = mock.Mock()
+        login.attempt.return_value = {
+            "submitted": True,
+            "challenge": "slider",
+            "manual_login_url": "https://study.xiaoe-tech.com/#/acount",
+        }
+        with mock.patch("xiaoe_cli.main.build_browser_manager", return_value=browser), mock.patch(
+            "xiaoe_cli.main.XiaoeCredentialStore", return_value=credential_store
+        ), mock.patch("xiaoe_cli.main.XiaoePasswordLogin", return_value=login), mock.patch(
+            "xiaoe_cli.main.inspect_saved_session"
+        ) as inspect:
+            exit_code, output, errors = self.invoke(["auth", "login", "--json"])
+        self.assertEqual(1, exit_code, errors)
+        payload = json.loads(output)
+        self.assertFalse(payload["handed_off"])
+        self.assertEqual("manual_verification_required", payload["login"])
+        inspect.assert_not_called()
+
     def test_auth_login_uses_saved_credentials_and_verifies_the_session(self) -> None:
         browser = mock.Mock()
         browser.browser_name = "chrome"

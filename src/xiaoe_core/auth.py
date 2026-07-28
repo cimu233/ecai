@@ -88,7 +88,6 @@ class XiaoePasswordLogin:
     def attempt(self, credentials: XiaoeCredentials) -> Dict[str, Any]:
         endpoint = self.browser.ensure_running(visible=False)
         page = self.browser.open_page(endpoint, XIAOE_LOGIN_URL)
-        keep_page_open = False
         try:
             page.collect_events(4.0)
             result = page.command(
@@ -128,14 +127,13 @@ class XiaoePasswordLogin:
                     page.collect_events(3.0)
                     value["challenge"] = None
                     value["auto_solved"] = True
-                elif hasattr(page, "handoff"):
-                    page.handoff()
-                    value["handed_off"] = True
-                    keep_page_open = True
+                else:
+                    value["handed_off"] = False
+                    value["background_only"] = True
+                    value["manual_login_url"] = XIAOE_LOGIN_URL
             return value
         finally:
-            if not keep_page_open:
-                page.close()
+            page.close()
 
     @staticmethod
     def _expression(credentials: XiaoeCredentials) -> str:

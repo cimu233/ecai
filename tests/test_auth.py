@@ -102,7 +102,7 @@ class XiaoePasswordLoginTest(unittest.TestCase):
         self.assertNotIn("top-secret", json.dumps(result))
         self.assertTrue(browser.page.closed)
 
-    def test_slider_challenge_hands_off_ego_page_without_closing_it(self):
+    def test_slider_challenge_stays_in_background_without_handoff(self):
         class FakeEgoPage:
             def __init__(self):
                 self.closed = False
@@ -142,9 +142,10 @@ class XiaoePasswordLoginTest(unittest.TestCase):
         browser = FakeEgoBrowser()
         result = XiaoePasswordLogin(browser).attempt(XiaoeCredentials("user", "password"))
         self.assertEqual("slider", result["challenge"])
-        self.assertTrue(result["handed_off"])
-        self.assertTrue(browser.page.handed_off)
-        self.assertFalse(browser.page.closed)
+        self.assertFalse(result["handed_off"])
+        self.assertTrue(result["background_only"])
+        self.assertFalse(browser.page.handed_off)
+        self.assertTrue(browser.page.closed)
 
 
 if __name__ == "__main__":

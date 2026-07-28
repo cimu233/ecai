@@ -146,12 +146,13 @@ xiaoe auth stop
 When `--recover` finds an expired login, it first reads `xiaoe.login.username`
 and `xiaoe.login.password` from macOS Keychain. If they are absent, it reads the
 private `~/.xiaoe-audio-pipeline/xiaoe-login.json` file. The desktop launcher
-creates and opens that file when credentials are missing. Its permissions are
-forced to `600`.
+prints that path when credentials are missing and never opens another app. Its
+permissions are forced to `600`.
 
 The password form at `https://study.xiaoe-tech.com/#/acount` is submitted in the
-selected browser's managed profile. QR code, image code, slider, SMS, and device
-verification remain interactive and open a visible browser window when needed.
+selected browser's managed profile. Automated browser work always stays in the
+background. When QR code, image code, slider, SMS, or device verification is
+required, the CLI prints the login URL so the user can open it manually later.
 Desktop menu item 1 runs `auth login` directly and never asks for a course URL.
 
 ## Processing Details
