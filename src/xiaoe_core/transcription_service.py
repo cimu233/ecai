@@ -31,7 +31,11 @@ class AudioChunker:
         process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if process.returncode != 0:
             raise AsrError("audio_chunk_failed", "ffmpeg could not prepare audio for transcription.")
-        chunks = sorted(output_dir.glob("chunk_*.{}".format(self.output_format)))
+        chunks = [
+            chunk
+            for chunk in sorted(output_dir.glob("chunk_*.{}".format(self.output_format)))
+            if chunk.stat().st_size >= 4096
+        ]
         if not chunks:
             raise AsrError("audio_chunk_failed", "ffmpeg produced no transcription chunks.")
         return chunks

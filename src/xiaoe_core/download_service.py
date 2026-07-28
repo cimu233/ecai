@@ -46,7 +46,7 @@ class DownloadService:
         items = []
         for idx, lesson in enumerate(lessons, 1):
             existing = self.lessons.audio_artifact(lesson.id)
-            if lesson.status == "audio_ready" and existing is not None and self._artifact_is_valid(existing):
+            if existing is not None and self._artifact_is_valid(existing):
                 items.append(
                     DownloadItemResult(
                         lesson_id=lesson.id,

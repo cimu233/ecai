@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
 from xiaoe_core.config import AppPaths
 from xiaoe_core.database import Database
@@ -74,6 +75,19 @@ class TranscriptionServiceTest(unittest.TestCase):
         row = self.lessons.transcript(self.lesson.id)
         self.assertEqual("transcript_ready", row["status"])
         self.assertEqual("fake", row["provider"])
+
+    def test_chunker_ignores_tiny_trailing_segment(self):
+        output_dir = Path(self.temp_dir.name) / "chunks"
+
+        def create_chunks(*args, **kwargs):
+            (output_dir / "chunk_0000.mp3").write_bytes(b"a" * 5000)
+            (output_dir / "chunk_0001.mp3").write_bytes(b"b" * 719)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("xiaoe_core.transcription_service.subprocess.run", side_effect=create_chunks):
+            chunks = AudioChunker(ffmpeg="ffmpeg").split(self.audio, output_dir)
+
+        self.assertEqual([output_dir / "chunk_0000.mp3"], chunks)
 
 
 if __name__ == "__main__":

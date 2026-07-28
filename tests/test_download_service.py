@@ -76,6 +76,17 @@ class DownloadServiceTest(unittest.TestCase):
         self.assertNotIn("lesson.wav", metadata)
         self.assertNotIn("Cookie", metadata)
 
+    def test_transcribed_lesson_reuses_valid_audio_without_resolving_again(self) -> None:
+        first = self.service.download_course(self.course.id)
+        self.assertEqual(1, first.succeeded)
+        self.lessons.set_status(self.lesson.id, "transcript_ready")
+
+        second = self.service.download_course(self.course.id)
+
+        self.assertEqual(1, second.skipped)
+        self.assertEqual(1, self.lessons.get(self.lesson.id).attempt_count)
+        self.assertEqual("transcript_ready", self.lessons.get(self.lesson.id).status)
+
     def test_cli_download_outputs_frontend_ready_json(self) -> None:
         output = io.StringIO()
         errors = io.StringIO()

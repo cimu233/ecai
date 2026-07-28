@@ -108,9 +108,21 @@ class CdpClient:
     def command(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         request_id = self.next_id
         self.next_id += 1
+        original_timeout = self.socket.gettimeout()
+        command_timeout = float(original_timeout or 10.0)
+        if method == "Runtime.evaluate" and bool((params or {}).get("awaitPromise")):
+            command_timeout = max(command_timeout, 30.0)
+        deadline = time.monotonic() + command_timeout
         try:
             self.socket.send(json.dumps({"id": request_id, "method": method, "params": params or {}}))
             while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise BrowserError(
+                        "cdp_timeout",
+                        "Browser CDP command timed out: {}".format(method),
+                    )
+                self.socket.settimeout(remaining)
                 message = json.loads(self.socket.recv())
                 if message.get("id") == request_id:
                     if "error" in message:
@@ -119,8 +131,15 @@ class CdpClient:
                 self.events.append(message)
         except BrowserError:
             raise
+        except websocket.WebSocketTimeoutException as error:
+            raise BrowserError(
+                "cdp_timeout",
+                "Browser CDP command timed out: {}".format(method),
+            ) from error
         except (OSError, ValueError, websocket.WebSocketException) as error:
             raise BrowserError("cdp_disconnected", "Browser page connection was interrupted.") from error
+        finally:
+            self.socket.settimeout(original_timeout)
 
     def collect_events(self, seconds: float) -> List[Dict[str, Any]]:
         deadline = time.monotonic() + seconds

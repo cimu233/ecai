@@ -172,6 +172,7 @@ class CliTest(unittest.TestCase):
         payload = json.loads(output)
         self.assertEqual("completed", payload["login"])
         self.assertEqual("file", payload["credential_source"])
+        self.assertEqual("https://study.xiaoe-tech.com/#/acount", payload["checked_url"])
         login.attempt.assert_called_once()
 
     def test_auth_recovery_verifies_course_after_password_submission(self) -> None:

@@ -103,7 +103,7 @@ def _import_if_none(module_attr: str, module_path: str, import_name: str, alias:
 
 def _safe_provider_choices():
     """Return ASR provider choices without crashing if deps are missing."""
-    return ["local", "dashscope", "openai", "groq", "deepgram", "volcengine", "tencent", "baidu", "custom"]
+    return ["local", "alibaba", "openai", "groq", "deepgram", "volcengine", "tencent", "baidu", "custom"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -448,7 +448,7 @@ def run(arguments: argparse.Namespace) -> int:
                 )
                 return 3
             attempt = XiaoePasswordLogin(chrome).attempt(credentials)
-            check_url = resolve_auth_check_url(service, None)
+            check_url = XIAOE_LOGIN_URL
             if attempt.get("challenge") and attempt.get("handed_off"):
                 emit_auth(
                     {
