@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import tempfile
+import threading
 import unittest
 import wave
 from pathlib import Path
@@ -14,7 +15,7 @@ from xiaoe_core.config import AppPaths
 from xiaoe_core.database import Database
 from xiaoe_core.download_service import DownloadService
 from xiaoe_core.downloader import AudioDownloader, ffmpeg_executable
-from xiaoe_core.media import MediaSelector, StoredUrlResolver
+from xiaoe_core.media import DownloadResult, MediaSelector, MediaSource, StoredUrlResolver
 from xiaoe_core.services import CourseService, LessonService
 
 
@@ -130,6 +131,66 @@ class DownloadServiceTest(unittest.TestCase):
         lesson = self.lessons.get(self.lesson.id)
         self.assertEqual("pending_source", lesson.status)
         self.assertIsNone(lesson.last_error_code)
+
+    def test_next_lesson_source_is_prefetched_while_current_audio_downloads(self) -> None:
+        second = self.lessons.upsert(
+            course_id=self.course.id,
+            position=2,
+            title="Lesson Two",
+            source_url="https://school.example.com/lesson/2",
+        )
+        second_resolved = threading.Event()
+
+        class Resolver:
+            def resolve(inner_self, lesson, force_refresh=False):
+                del force_refresh
+                if lesson.id == second.id:
+                    second_resolved.set()
+                return [
+                    MediaSource(
+                        url=self.server.base_url + "/lesson.wav",
+                        kind="direct_audio",
+                    )
+                ]
+
+        class CoordinatedDownloader:
+            show_progress = False
+
+            def set_progress_context(inner_self, index, total):
+                del index, total
+
+            def download(inner_self, request, on_stage=None):
+                if request.lesson.id == self.lesson.id:
+                    self.assertTrue(second_resolved.wait(timeout=2))
+                request.output_dir.mkdir(parents=True, exist_ok=True)
+                output = request.output_dir / "audio.source.m4a"
+                output.write_bytes(b"audio")
+                if on_stage:
+                    on_stage("verifying")
+                return DownloadResult(
+                    file_path=output,
+                    size_bytes=5,
+                    sha256="0" * 64,
+                    duration_seconds=1.0,
+                    container="m4a",
+                    codec="aac",
+                    source_kind=request.source.kind,
+                    source_host=request.source.host,
+                )
+
+        service = DownloadService(
+            paths=self.paths,
+            courses=self.courses,
+            lessons=self.lessons,
+            resolver=Resolver(),
+            selector=MediaSelector(),
+            downloader=CoordinatedDownloader(),
+        )
+
+        result = service.download_course(self.course.id)
+
+        self.assertEqual(2, result.succeeded)
+        self.assertTrue(second_resolved.is_set())
 
     def test_legacy_browser_failures_are_recovered_before_retry(self) -> None:
         self.lessons.set_failure(

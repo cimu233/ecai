@@ -2,11 +2,13 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from xiaoe_core.browser import BrowserError
 from xiaoe_core.config import AppPaths
 from xiaoe_core.database import Database
 from xiaoe_core.services import CourseService, LessonService
+from xiaoe_core.models import Lesson
 from xiaoe_core.xiaoe import (
     XiaoeAccountCatalogService,
     XiaoeBrowserMediaResolver,
@@ -52,7 +54,65 @@ class XiaoeParsingTest(unittest.TestCase):
     def test_catalog_expansion_supports_xiaoe_collapsed_chapters(self):
         expression = XiaoeCatalogService._expand_expression()
         self.assertIn('[aria-label="展开"]', expression)
-        self.assertIn("await wait(900)", expression)
+        self.assertIn("querySelectorAll", expression)
+        self.assertIn(".slice(0, 25)", expression)
+        self.assertIn("await wait(350)", expression)
+
+    def test_performance_entries_expose_nested_media_url(self):
+        media_url = "https://cdn.example.com/audio/playlist_eof.m3u8?t=1234"
+        report_url = (
+            "https://report.example.com/collect?params%5Bplay_url%5D="
+            "https%3A%2F%2Fcdn.example.com%2Faudio%2Fplaylist_eof.m3u8%3Ft%3D1234"
+        )
+
+        class Page:
+            def command(self, method, params):
+                self.method = method
+                self.params = params
+                return {"result": {"value": json.dumps([report_url])}}
+
+        self.assertEqual(
+            [media_url],
+            XiaoeBrowserMediaResolver._performance_media_urls(Page()),
+        )
+
+    def test_force_refresh_reuses_authenticated_gateway(self):
+        browser = mock.Mock()
+        browser.capture_media.return_value = {
+            "state": {"status": "authenticated"},
+            "events": [
+                {
+                    "method": "Network.responseReceived",
+                    "params": {
+                        "response": {
+                            "url": "https://cdn.example.com/a.m3u8?t=1234",
+                            "mimeType": "application/vnd.apple.mpegurl",
+                        }
+                    },
+                }
+            ],
+            "cookies": [],
+        }
+        current_lesson = Lesson(
+            id="course_1_lesson_1",
+            course_id="course_1",
+            position=1,
+            title="Lesson",
+            source_url="https://school.example.com/lesson/1",
+            status="pending_source",
+            error=None,
+            attempt_count=0,
+            last_error_code=None,
+            last_error_at=None,
+            created_at="2026-01-01",
+            updated_at="2026-01-01",
+        )
+
+        XiaoeBrowserMediaResolver(browser).resolve(
+            current_lesson, force_refresh=True
+        )
+
+        browser.invalidate_gateway.assert_not_called()
 
     def test_catalog_position_prefers_global_sort_value(self):
         item = {"sort_value": "49", "sort_c": "1"}

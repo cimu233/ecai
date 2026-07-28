@@ -329,20 +329,40 @@ def classify_xiaoe_page(url: str, body_text: str, has_login_challenge: bool = Fa
 
 
 def inspect_page(page: CdpClient, wait_seconds: float = 3.0, preserve_events: bool = False) -> Dict[str, str]:
-    events = page.collect_events(wait_seconds)
-    if preserve_events:
-        page.events.extend(events)
     expression = """JSON.stringify({
       url: location.href,
       title: document.title,
       body: (document.body && document.body.innerText || '').slice(0, 12000),
+      ready: document.readyState !== 'loading',
       loginChallenge: !!document.querySelector(
         '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
       )
     })"""
-    result = page.command("Runtime.evaluate", {"expression": expression, "returnByValue": True})
-    value = result.get("result", {}).get("value", "{}")
-    state = json.loads(value)
+    deadline = time.monotonic() + max(0.0, wait_seconds)
+    state: Dict[str, Any] = {}
+    while True:
+        try:
+            result = page.command(
+                "Runtime.evaluate",
+                {"expression": expression, "returnByValue": True},
+            )
+            value = result.get("result", {}).get("value", "{}")
+            state = json.loads(value)
+        except (BrowserError, json.JSONDecodeError):
+            state = {}
+        body = str(state.get("body") or "")
+        if state.get("ready") and (
+            len(body) > 50 or state.get("loginChallenge")
+        ):
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+
+    events = page.collect_events(0.1)
+    if preserve_events:
+        page.events.extend(events)
+    state.pop("ready", None)
     state["status"] = classify_xiaoe_page(
         state.get("url", ""),
         state.get("body", ""),

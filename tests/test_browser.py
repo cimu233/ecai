@@ -108,6 +108,24 @@ class BrowserHelpersTest(unittest.TestCase):
         self.assertIn("parsed.searchParams.values()", scripts[0])
         self.assertIn("await click([playback.clickPoint.x", scripts[0])
 
+    def test_catalog_capture_keeps_reusable_tab_and_cleans_spawned_tabs(self):
+        scripts = []
+
+        def runner(script):
+            scripts.append(script)
+            return {
+                "value": {
+                    "state": {"url": "https://example.com", "body": ""},
+                    "payloads": [],
+                }
+            }
+
+        manager = EgoBrowserManager(cli=EgoCli(runner=runner))
+        manager.capture_catalog("https://example.com/course", "(() => 0)()", 0)
+
+        self.assertIn("await cleanupOperationTabs()", scripts[0])
+        self.assertNotIn("await closeTab(tab.targetId)", scripts[0])
+
     def test_ego_running_process_is_reused(self):
         process_runner = mock.Mock(return_value=mock.Mock(returncode=0))
         cli = EgoCli(

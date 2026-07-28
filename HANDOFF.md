@@ -63,7 +63,7 @@ xiaoe-audio-pipeline/
 │   ├── configure_asr.py
 │   ├── configure_structure.py
 │   └── select_course.py
-├── tests/                   # 20 个测试文件，114 个测试用例全部通过
+├── tests/                   # 21 个测试文件，122 个测试用例全部通过
 ├── .github/workflows/
 │   └── build.yml            # GitHub Actions Windows 构建（有未推送的修复）
 ├── Xiaoe Audio Pipeline.command  # macOS 双击启动的 Shell 菜单

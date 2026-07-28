@@ -268,6 +268,8 @@ cliLog({marker} + JSON.stringify(state))
 
     def capture_catalog(self, url: str, expression: str, wait_seconds: float = 6.0) -> Dict[str, Any]:
         script = self._operation_prefix(url) + """
+let captureResult
+try {{
 const state = await js(String.raw`({{
   url: location.href,
   title: document.title,
@@ -293,8 +295,11 @@ for (const event of responses) {{
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) payloads.push(parsed)
   }} catch (error) {{}}
 }}
-await closeTab(tab.targetId)
-cliLog({marker} + JSON.stringify({{state, payloads}}))
+captureResult = {{state, payloads}}
+}} finally {{
+  await cleanupOperationTabs()
+}}
+cliLog({marker} + JSON.stringify(captureResult))
 """.format(
             expression=json.dumps(expression, ensure_ascii=False),
             wait_seconds=max(0.0, wait_seconds),
@@ -313,6 +318,8 @@ cliLog({marker} + JSON.stringify({{state, payloads}}))
     def capture_account_courses(self, origin: str) -> Dict[str, Any]:
         url = "https://study.xiaoe-tech.com/t_l/learnIndex#/muti_index"
         script = self._operation_prefix(url) + """
+let captureResult
+try {{
 const state = await js(String.raw`({{
   url: location.href,
   title: document.title,
@@ -346,8 +353,11 @@ const rows = await js(String.raw`(async () => {{
   }}
   return collected
 }})()`)
-await closeTab(tab.targetId)
-cliLog({marker} + JSON.stringify({{state, rows}}))
+captureResult = {{state, rows}}
+}} finally {{
+  await cleanupOperationTabs()
+}}
+cliLog({marker} + JSON.stringify(captureResult))
 """.format(marker=json.dumps(EGO_MARKER))
         value = self.cli.run(script, timeout=90.0)
         state = value.get("state", {})
@@ -373,14 +383,18 @@ const state = await js(String.raw`({{
 const mediaPattern = /\\.m3u8(?:$|\\?)|\\.(?:mp3|m4a|aac|flac|ogg|wav|mp4|webm)(?:$|\\?)/i
 const events = []
 const deadline = Date.now() + {wait_milliseconds}
+let nextPlaybackAt = 0
 while (Date.now() < deadline) {{
-  const playback = await js({expression})
-  if (playback && playback.clickPoint) {{
-    await wait(0.1)
-    const playing = await js(String.raw`[...document.querySelectorAll('audio,video')].some(node => !node.paused)`)
-    if (!playing) await click([playback.clickPoint.x, playback.clickPoint.y])
+  if (Date.now() >= nextPlaybackAt) {{
+    const playback = await js({expression})
+    if (playback && playback.clickPoint) {{
+      await wait(0.1)
+      const playing = await js(String.raw`[...document.querySelectorAll('audio,video')].some(node => !node.paused)`)
+      if (!playing) await click([playback.clickPoint.x, playback.clickPoint.y])
+    }}
+    nextPlaybackAt = Date.now() + 1000
   }}
-  await wait(Math.min(1, Math.max(0.1, (deadline - Date.now()) / 1000)))
+  await wait(Math.min(0.25, Math.max(0.05, (deadline - Date.now()) / 1000)))
   events.push(...await drainEvents())
   const found = events.some(event => {{
     if (event.method !== 'Network.responseReceived') return false
@@ -393,7 +407,7 @@ while (Date.now() < deadline) {{
     /playlist_eof\\.m3u8|params(?:%5B|\\[)play_url/i.test(entry.name || '')
   )`)
   if (found || performanceFound) {{
-    await wait(0.4)
+    await wait(0.15)
     events.push(...await drainEvents())
     break
   }}
@@ -620,8 +634,19 @@ cliLog({marker} + JSON.stringify(result))
                 "}",
             ])
         lines.extend([
-                "await gotoUrl(requestedUrl)",
-                "await wait(2)",
+                "const currentUrl = await js(String.raw`location.href`)",
+                "if (currentUrl !== requestedUrl) {",
+                "  await gotoUrl(requestedUrl)",
+                "  const navigationDeadline = Date.now() + 4000",
+                "  while (Date.now() < navigationDeadline) {",
+                "    const ready = await js(String.raw`location.href === " + json.dumps(url) + " &&",
+                "      document.readyState !== 'loading' && !!document.body &&",
+                "      ((document.body.innerText || '').length > 50 ||",
+                "       !!document.querySelector('audio,video,.xgplayer-start,[class*=\"qrcode\"]'))`)",
+                "    if (ready) break",
+                "    await wait(0.2)",
+                "  }",
+                "}",
                 "tab = await currentTab()",
                 "const cleanupOperationTabs = async () => {",
                 "  const tabsAfter = await listTabs()",

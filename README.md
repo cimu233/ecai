@@ -186,6 +186,12 @@ record is missing, `download.json` is used to restore it automatically. Use
 `--force-transcription` or `--force-structure` with `xiaoe run` when regeneration
 is intentional.
 
+During a course download, the browser resolves the next incomplete lesson while
+ffmpeg processes the current lesson. Short-lived signed media URLs are cached in
+the lesson directory with `600` permissions, so an interrupted run can resume
+without reopening the lesson page while the URL is valid. Browser cookies and
+authorization headers are never written to this cache.
+
 Authentication checks:
 
 ```bash
@@ -212,6 +218,7 @@ Desktop menu item 1 runs `auth login` directly and never asks for a course URL.
 
 - Account discovery reads the authorized “我的课程” list and imports columns, large columns, camps, memberships, and course catalogs.
 - Course discovery listens to authorized page JSON responses and uses Xiaoe `resource_id` as the stable lesson key.
+- Collapsed catalog chapters are expanded in bounded batches, and the active browser tab and authenticated Gateway are reused across the course run.
 - Direct audio preserves original bytes and supports HTTP Range resume.
 - HLS prefers an independent audio rendition; mixed video streams are reduced to their first audio track.
 - Interrupted HLS output cannot safely resume from an incomplete m4a container, so only that current lesson restarts; completed lesson audio is retained and skipped.

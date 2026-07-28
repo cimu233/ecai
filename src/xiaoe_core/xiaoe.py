@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 from .browser import BrowserError, cookie_header, inspect_page
 from .config import AppPaths
@@ -220,7 +220,7 @@ class XiaoeCatalogService:
 
     def _capture_items(self, course: Any) -> List[Dict[str, Any]]:
         if hasattr(self.chrome, "capture_catalog"):
-            captured = self.chrome.capture_catalog(course.source_url, self._expand_expression(), 2.0)
+            captured = self.chrome.capture_catalog(course.source_url, self._expand_expression(), 1.0)
             state = captured["state"]
             payloads = captured["payloads"]
         else:
@@ -236,7 +236,7 @@ class XiaoeCatalogService:
                         "returnByValue": True,
                     },
                 )
-                events = page.collect_events(6.0)
+                events = page.collect_events(1.0)
                 payloads = response_json(page, events)
             finally:
                 page.close()
@@ -267,16 +267,18 @@ class XiaoeCatalogService:
         return """(async () => {
           const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
           let expanded = 0;
-          for (let attempt = 0; attempt < 100; attempt += 1) {
-            const node = document.querySelector(
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            const nodes = [...document.querySelectorAll(
               '[role="button"][aria-label="展开"], [aria-expanded="false"], details:not([open])'
-            );
-            if (!node) break;
-            node.scrollIntoView({block: 'center'});
-            if (node.tagName === 'DETAILS') node.open = true;
-            else node.click();
-            expanded += 1;
-            await wait(900);
+            )].slice(0, 25);
+            if (!nodes.length) break;
+            for (const node of nodes) {
+              node.scrollIntoView({block: 'center'});
+              if (node.tagName === 'DETAILS') node.open = true;
+              else node.click();
+              expanded += 1;
+            }
+            await wait(350);
           }
           window.scrollTo(0, document.body.scrollHeight);
           return expanded;
@@ -461,8 +463,6 @@ class XiaoeBrowserMediaResolver:
         wait = self.wait_seconds + (10.0 if force_refresh else 0.0)
 
         if hasattr(self.chrome, "capture_media"):
-            if force_refresh and hasattr(self.chrome, "invalidate_gateway"):
-                self.chrome.invalidate_gateway()
             captured = self.chrome.capture_media(lesson.source_url, self._play_expression(), wait)
             state = captured["state"]
             events = captured["events"]
@@ -472,10 +472,7 @@ class XiaoeBrowserMediaResolver:
             page = self.chrome.open_page(endpoint, lesson.source_url)
             try:
                 state = inspect_page(page, 3.0, preserve_events=True)
-                self._trigger_playback(page, wait)
-                # Events were already collected during inspect_page and
-                # _trigger_playback; a short grace period catches stragglers.
-                events = page.collect_events(2.0)
+                events = self._trigger_playback(page, wait)
             finally:
                 page.close()
             cookies = self.chrome.cookies(endpoint)
@@ -486,27 +483,75 @@ class XiaoeBrowserMediaResolver:
             raise DownloadError("source_unavailable", "No playable audio or HLS request was observed.")
         return [self._source(url, lesson.source_url, cookies) for url in urls]
 
-    def _trigger_playback(self, page: Any, total_wait: float) -> None:
-        """Click play buttons in stages, waiting between attempts so the
-        page has time to render audio elements after a navigation or
-        lazy-loaded component mounts."""
+    def _trigger_playback(self, page: Any, total_wait: float) -> List[Dict[str, Any]]:
+        """Trigger playback while returning as soon as a media URL appears."""
         import time
 
-        # Stage 1: immediate attempt — often catches already-visible players.
-        page.command("Runtime.evaluate", {"expression": self._play_expression()})
-        time.sleep(1.5)
+        events: List[Dict[str, Any]] = []
+        deadline = time.monotonic() + max(0.0, total_wait)
+        next_playback = 0.0
+        while time.monotonic() < deadline:
+            if time.monotonic() >= next_playback:
+                page.command("Runtime.evaluate", {"expression": self._play_expression()})
+                next_playback = time.monotonic() + 1.0
+            events.extend(
+                page.collect_events(
+                    min(0.25, max(0.05, deadline - time.monotonic()))
+                )
+            )
+            if self._media_urls(events):
+                break
+            performance_urls = self._performance_media_urls(page)
+            if performance_urls:
+                events.extend(self._synthetic_media_events(performance_urls))
+                break
+        return events
 
-        # Stage 2: retry after a short settle.  Some Xiaoe pages load the
-        # player asynchronously after the initial React/Vue render.
-        page.command("Runtime.evaluate", {"expression": self._play_expression()})
-        time.sleep(1.5)
+    @staticmethod
+    def _performance_media_urls(page: Any) -> List[str]:
+        expression = """JSON.stringify(
+          performance.getEntriesByType('resource').map(entry => entry.name)
+        )"""
+        try:
+            result = page.command(
+                "Runtime.evaluate",
+                {"expression": expression, "returnByValue": True},
+            )
+            value = result.get("result", {}).get("value", "[]")
+            entries = json.loads(value)
+        except (BrowserError, TypeError, ValueError, json.JSONDecodeError):
+            return []
+        urls = []
+        for entry in entries if isinstance(entries, list) else []:
+            try:
+                values = parse_qs(urlparse(str(entry)).query).values()
+            except ValueError:
+                continue
+            for group in values:
+                for value in group:
+                    if value.startswith(("http://", "https://")) and MEDIA_PATTERN.search(value):
+                        if value not in urls:
+                            urls.append(value)
+        return urls
 
-        # Stage 3: final attempt after the bulk of the wait has passed,
-        # right before we collect events.
-        remaining = total_wait - 3.0
-        if remaining > 1.0:
-            time.sleep(remaining - 1.0)
-            page.command("Runtime.evaluate", {"expression": self._play_expression()})
+    @staticmethod
+    def _synthetic_media_events(urls: Iterable[str]) -> List[Dict[str, Any]]:
+        return [
+            {
+                "method": "Network.responseReceived",
+                "params": {
+                    "response": {
+                        "url": url,
+                        "mimeType": (
+                            "application/vnd.apple.mpegurl"
+                            if ".m3u8" in urlparse(url).path.lower()
+                            else "audio/mpeg"
+                        ),
+                    }
+                },
+            }
+            for url in urls
+        ]
 
     @staticmethod
     def _play_expression() -> str:
