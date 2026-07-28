@@ -9,7 +9,7 @@ from .asr import AsrError, AsrProvider, merge_chunk_results
 from .config import AppPaths
 from .downloader import ffmpeg_executable
 from .models import TranscriptionBatchResult, TranscriptionItemResult, TranscriptResult
-from .progress import finish_progress, update_progress
+from .progress import ProgressSpinner, finish_progress
 from .services import CourseService, LessonService
 
 
@@ -131,20 +131,28 @@ class TranscriptionService:
         lesson_dir = Path(artifact["file_path"]).parent
         self.lessons.begin_transcription(lesson_id, self.provider.name, self.provider.model)
         try:
-            chunks = self.chunker.split(Path(artifact["file_path"]), lesson_dir / "asr_chunks")
+            with ProgressSpinner(
+                "  [{}/{}] 正在准备转写音频：{}".format(
+                    progress_index, progress_total, title[:32]
+                ),
+                enabled=None if self.show_progress else False,
+            ):
+                chunks = self.chunker.split(
+                    Path(artifact["file_path"]), lesson_dir / "asr_chunks"
+                )
             results = []
             for chunk_index, chunk in enumerate(chunks, 1):
-                if self.show_progress:
-                    update_progress(
-                        "  [{}/{}] 语音转文字：{}（分块 {}/{}）".format(
-                            progress_index,
-                            progress_total,
-                            title[:32],
-                            chunk_index,
-                            len(chunks),
-                        )
-                    )
-                results.append(self.provider.transcribe(chunk))
+                with ProgressSpinner(
+                    "  [{}/{}] 语音转文字：{}（分块 {}/{}）".format(
+                        progress_index,
+                        progress_total,
+                        title[:32],
+                        chunk_index,
+                        len(chunks),
+                    ),
+                    enabled=None if self.show_progress else False,
+                ):
+                    results.append(self.provider.transcribe(chunk))
             offsets = [index * float(self.chunker.chunk_seconds) for index in range(len(chunks))]
             result = merge_chunk_results(results, offsets)
             raw_path = lesson_dir / "transcript.raw.json"

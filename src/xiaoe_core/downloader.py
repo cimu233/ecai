@@ -221,6 +221,12 @@ class AudioDownloader:
         final_path = request.output_dir / "audio.source.m4a"
         partial_path = request.output_dir / "audio.partial.m4a"
         if partial_path.exists():
+            if self.show_progress and partial_path.stat().st_size > 0:
+                finish_progress(
+                    "  [{}/{}] 检测到中断的当前课，临时 m4a 无法安全续传，将重新下载本节。".format(
+                        self._progress_index, self._progress_total
+                    )
+                )
             partial_path.unlink()
 
         copy_command = self._ffmpeg_download_command(source, input_url, partial_path, copy_audio=True)

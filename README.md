@@ -180,7 +180,11 @@ xiaoe structure COURSE_ID --limit 1 --provider claude-code --model sonnet --effo
 xiaoe status --json
 ```
 
-Completed artifacts are checksum-checked and skipped on later runs. Use `--force-transcription` or `--force-structure` with `xiaoe run` when regeneration is intentional.
+Completed audio artifacts are matched by their persisted metadata and file size,
+then skipped on later runs without re-reading gigabytes of media. If the database
+record is missing, `download.json` is used to restore it automatically. Use
+`--force-transcription` or `--force-structure` with `xiaoe run` when regeneration
+is intentional.
 
 Authentication checks:
 
@@ -210,6 +214,7 @@ Desktop menu item 1 runs `auth login` directly and never asks for a course URL.
 - Course discovery listens to authorized page JSON responses and uses Xiaoe `resource_id` as the stable lesson key.
 - Direct audio preserves original bytes and supports HTTP Range resume.
 - HLS prefers an independent audio rendition; mixed video streams are reduced to their first audio track.
+- Interrupted HLS output cannot safely resume from an incomplete m4a container, so only that current lesson restarts; completed lesson audio is retained and skipped.
 - Standard AES-128 HLS is handled by ffmpeg. SAMPLE-AES and DRM are reported as unsupported.
 - Long audio is split locally into provider-sized, 16 kHz mono chunks. Baidu uses 55-second WAV chunks; the other current providers use four-minute MP3 chunks. The local Qwen worker loads the model once and transcribes all chunks through Apple MPS.
 - Raw provider responses, normalized transcripts, plain text, structured JSON, and Markdown notes are all retained.
@@ -255,6 +260,9 @@ CLI preserves completed artifacts and pauses at the current task. Finish the
 browser action and press Enter in the CLI to reclaim the same Ego Task Space and
 resume. JSON and other non-interactive runs return the control error immediately
 so unattended callers never wait for terminal input.
+
+Long-running catalog, media-source, ASR, and structuring operations show a
+TTY-only spinner with elapsed seconds. Redirected and JSON output stays clean.
 
 ## Safety
 

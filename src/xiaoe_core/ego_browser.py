@@ -202,6 +202,7 @@ class EgoBrowserManager:
         self.cli = cli or EgoCli()
         self.task_name = task_name
         self.task_id: Optional[int] = None
+        self.gateway_ready = False
 
     def ensure_application_running(self) -> Dict[str, bool]:
         return self.cli.ensure_browser_running()
@@ -222,10 +223,16 @@ if (existing && existing.ownership === 'agentDelegatedToUser') {{
   task = await useOrCreateTaskSpace({task_name})
 }}
 const tabs = await listTabs()
+const contentTabs = tabs.filter(tab => {{
+  const url = String(tab.url || '')
+  return url && url !== 'about:blank' && !url.startsWith('chrome://')
+}})
 for (const tab of tabs) {{
   const url = String(tab.url || '')
   const title = String(tab.title || '')
   if (url.includes('diting.bytedance.com/') || title.includes('字节跳动网络诊断工具')) {{
+    await closeTab(tab.targetId)
+  }} else if (contentTabs.length > 0 && (url === 'about:blank' || url.startsWith('chrome://'))) {{
     await closeTab(tab.targetId)
   }}
 }}
@@ -294,6 +301,7 @@ cliLog({marker} + JSON.stringify({{state, payloads}}))
             marker=json.dumps(EGO_MARKER),
         )
         value = self.cli.run(script, timeout=max(60.0, wait_seconds + 40.0))
+        self.gateway_ready = True
         state = value.get("state", {})
         state["status"] = classify_xiaoe_page(
             state.get("url", ""),
@@ -351,7 +359,7 @@ cliLog({marker} + JSON.stringify({{state, rows}}))
         return {"state": state, "rows": value.get("rows", [])}
 
     def capture_media(self, url: str, expression: str, wait_seconds: float) -> Dict[str, Any]:
-        script = self._operation_prefix(url) + """
+        script = self._operation_prefix(url, bootstrap_gateway=not self.gateway_ready) + """
 let captureResult
 try {{
 const state = await js(String.raw`({{
@@ -362,10 +370,34 @@ const state = await js(String.raw`({{
     '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
   )
 }})`)
-await js({expression})
-await wait({wait_seconds})
-const events = await drainEvents()
 const mediaPattern = /\\.m3u8(?:$|\\?)|\\.(?:mp3|m4a|aac|flac|ogg|wav|mp4|webm)(?:$|\\?)/i
+const events = []
+const deadline = Date.now() + {wait_milliseconds}
+while (Date.now() < deadline) {{
+  const playback = await js({expression})
+  if (playback && playback.clickPoint) {{
+    await wait(0.1)
+    const playing = await js(String.raw`[...document.querySelectorAll('audio,video')].some(node => !node.paused)`)
+    if (!playing) await click([playback.clickPoint.x, playback.clickPoint.y])
+  }}
+  await wait(Math.min(1, Math.max(0.1, (deadline - Date.now()) / 1000)))
+  events.push(...await drainEvents())
+  const found = events.some(event => {{
+    if (event.method !== 'Network.responseReceived') return false
+    const response = event.params && event.params.response || {{}}
+    const url = response.url || ''
+    const mime = (response.mimeType || '').toLowerCase()
+    return mediaPattern.test(url) || mime.includes('mpegurl') || mime.startsWith('audio/')
+  }})
+  const performanceFound = await js(String.raw`performance.getEntriesByType('resource').some(entry =>
+    /playlist_eof\\.m3u8|params(?:%5B|\\[)play_url/i.test(entry.name || '')
+  )`)
+  if (found || performanceFound) {{
+    await wait(0.4)
+    events.push(...await drainEvents())
+    break
+  }}
+}}
 const mediaEvents = events.filter(event => {{
   if (event.method !== 'Network.responseReceived') return false
   const response = event.params && event.params.response || {{}}
@@ -386,6 +418,13 @@ const collectMediaUrls = value => {{
     return
   }}
   if (value && typeof value === 'object') Object.values(value).forEach(collectMediaUrls)
+}}
+const performanceEntries = await js(String.raw`performance.getEntriesByType('resource').map(entry => entry.name)`)
+for (const entry of performanceEntries) {{
+  try {{
+    const parsed = new URL(entry)
+    for (const value of parsed.searchParams.values()) collectMediaUrls(value)
+  }} catch (error) {{}}
 }}
 const playInfoResponses = events.filter(event =>
   event.method === 'Network.responseReceived' &&
@@ -423,6 +462,7 @@ cliLog({marker} + JSON.stringify(captureResult))
 """.format(
             expression=json.dumps(expression, ensure_ascii=False),
             wait_seconds=max(0.0, wait_seconds),
+            wait_milliseconds=max(0, int(wait_seconds * 1000)),
             marker=json.dumps(EGO_MARKER),
         )
         value = self.cli.run(script, timeout=max(60.0, wait_seconds + 40.0))
@@ -432,6 +472,8 @@ cliLog({marker} + JSON.stringify(captureResult))
             state.get("body", ""),
             bool(state.get("loginChallenge")),
         )
+        if state["status"] == "authenticated":
+            self.gateway_ready = True
         return {
             "state": state,
             "events": value.get("events", []),
@@ -474,7 +516,10 @@ cliLog({marker} + JSON.stringify(result))
         except BrowserError:
             pass
 
-    def _operation_prefix(self, url: str) -> str:
+    def invalidate_gateway(self) -> None:
+        self.gateway_ready = False
+
+    def _operation_prefix(self, url: str, bootstrap_gateway: bool = True) -> str:
         gateway_expression = """
 (async () => {
   const requestedUrl = __REQUESTED_URL__
@@ -532,16 +577,36 @@ cliLog({marker} + JSON.stringify(result))
   return payload.data || null
 })()
 """.replace("__REQUESTED_URL__", json.dumps(url))
-        return "\n".join(
-            [
+        lines = [
                 "const task = await useOrCreateTaskSpace({})".format(json.dumps(self.task_name)),
                 "const tabsBefore = await listTabs()",
                 "const baselineTabIds = new Set(tabsBefore.map(tab => tab.targetId))",
                 "const requestedUrl = {}".format(json.dumps(url)),
-                "await openOrReuseTab('about:blank', {wait: true, timeout: 20})",
+                "const contentTabs = tabsBefore.filter(candidate => {",
+                "  const url = String(candidate.url || '')",
+                "  return url && url !== 'about:blank' && !url.startsWith('chrome://')",
+                "})",
+                "let tab = contentTabs[0] || tabsBefore.find(candidate => candidate.url === 'about:blank')",
+                "if (!tab) {",
+                "  await openOrReuseTab('about:blank', {wait: true, timeout: 20})",
+                "  tab = await currentTab()",
+                "} else {",
+                "  await switchTab(tab.targetId)",
+                "}",
+                "if (contentTabs.length > 0) {",
+                "  for (const candidate of tabsBefore) {",
+                "    const url = String(candidate.url || '')",
+                "    if (candidate.targetId !== tab.targetId && (url === 'about:blank' || url.startsWith('chrome://'))) {",
+                "      await closeTab(candidate.targetId)",
+                "    }",
+                "  }",
+                "}",
                 "await cdp('Page.enable')",
                 "await cdp('Network.enable')",
                 "await drainEvents()",
+        ]
+        if bootstrap_gateway:
+            lines.extend([
                 "const requestedHost = new URL(requestedUrl).hostname",
                 "if (/\\.h5\\.(?:xet\\.pomoho|xiaoeknow)\\.com$/.test(requestedHost)) {",
                 "  await gotoAndWait({}, {{timeout: 30, settle: 1}})".format(
@@ -553,16 +618,19 @@ cliLog({marker} + JSON.stringify(result))
                 "    await wait(1)",
                 "  }",
                 "}",
-                "await gotoAndWait(requestedUrl, {timeout: 30, settle: 1})",
-                "const tab = await currentTab()",
+            ])
+        lines.extend([
+                "await gotoUrl(requestedUrl)",
+                "await wait(2)",
+                "tab = await currentTab()",
                 "const cleanupOperationTabs = async () => {",
                 "  const tabsAfter = await listTabs()",
                 "  for (const candidate of tabsAfter) {",
-                "    if (!baselineTabIds.has(candidate.targetId)) {",
+                "    if (candidate.targetId !== tab.targetId && !baselineTabIds.has(candidate.targetId)) {",
                 "      await closeTab(candidate.targetId)",
                 "    }",
                 "  }",
                 "}",
                 "",
-            ]
-        )
+            ])
+        return "\n".join(lines)

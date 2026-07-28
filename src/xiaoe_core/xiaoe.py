@@ -12,6 +12,7 @@ from .browser import BrowserError, cookie_header, inspect_page
 from .config import AppPaths
 from .media import DIRECT_AUDIO_SUFFIXES, DownloadError, MediaSource, StoredUrlResolver
 from .models import Lesson
+from .progress import ProgressSpinner
 from .services import CourseService, LessonService, utc_now
 
 
@@ -107,7 +108,8 @@ class XiaoeCatalogService:
         raw_path = self.paths.courses_dir / course.id / "catalog.raw.json"
         cached_items = self._cached_items(raw_path)
         try:
-            items = self._capture_items(course)
+            with ProgressSpinner("正在扫描课程目录"):
+                items = self._capture_items(course)
             raw_path.parent.mkdir(parents=True, exist_ok=True)
             self._atomic_json(raw_path, {"course_url": course.source_url, "items": items})
         except BrowserError as error:
@@ -446,7 +448,7 @@ class XiaoeAccountCatalogService:
 
 
 class XiaoeBrowserMediaResolver:
-    def __init__(self, chrome: Any, wait_seconds: float = 12.0) -> None:
+    def __init__(self, chrome: Any, wait_seconds: float = 18.0) -> None:
         self.chrome = chrome
         self.wait_seconds = wait_seconds
 
@@ -459,6 +461,8 @@ class XiaoeBrowserMediaResolver:
         wait = self.wait_seconds + (10.0 if force_refresh else 0.0)
 
         if hasattr(self.chrome, "capture_media"):
+            if force_refresh and hasattr(self.chrome, "invalidate_gateway"):
+                self.chrome.invalidate_gateway()
             captured = self.chrome.capture_media(lesson.source_url, self._play_expression(), wait)
             state = captured["state"]
             events = captured["events"]
@@ -508,7 +512,6 @@ class XiaoeBrowserMediaResolver:
     def _play_expression() -> str:
         return """(() => {
           const media = [...document.querySelectorAll('audio,video')];
-          media.forEach(node => { try { node.play(); } catch(e) {} });
 
           const selectors = [
             'button[aria-label*="播放"]',
@@ -534,10 +537,16 @@ class XiaoeBrowserMediaResolver:
             const rect = node.getBoundingClientRect();
             return !blocked.test(label) && rect.width > 0 && rect.height > 0;
           });
-          if (button) {
+          const needsPlayback = media.length === 0 || media.every(node => node.paused);
+          let clickPoint = null;
+          if (button && needsPlayback) {
+            const rect = button.getBoundingClientRect();
+            clickPoint = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
             try { button.click(); } catch(e) {}
+          } else if (!button && needsPlayback) {
+            media.forEach(node => { try { node.play(); } catch(e) {} });
           }
-          return {media: media.length, button_clicked: !!button};
+          return {media: media.length, button_clicked: !!button, clickPoint};
         })()"""
 
     @staticmethod

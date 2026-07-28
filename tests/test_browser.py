@@ -102,7 +102,11 @@ class BrowserHelpersTest(unittest.TestCase):
 
         self.assertIn("finally {", scripts[0])
         self.assertIn("await cleanupOperationTabs()", scripts[0])
-        self.assertIn("if (!baselineTabIds.has(candidate.targetId))", scripts[0])
+        self.assertIn("candidate.targetId !== tab.targetId", scripts[0])
+        self.assertIn("const deadline = Date.now()", scripts[0])
+        self.assertIn("if (found || performanceFound)", scripts[0])
+        self.assertIn("parsed.searchParams.values()", scripts[0])
+        self.assertIn("await click([playback.clickPoint.x", scripts[0])
 
     def test_ego_running_process_is_reused(self):
         process_runner = mock.Mock(return_value=mock.Mock(returncode=0))

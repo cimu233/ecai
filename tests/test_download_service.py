@@ -89,6 +89,29 @@ class DownloadServiceTest(unittest.TestCase):
         self.assertEqual(1, self.lessons.get(self.lesson.id).attempt_count)
         self.assertEqual("transcript_ready", self.lessons.get(self.lesson.id).status)
 
+    def test_missing_database_artifact_is_recovered_from_download_metadata(self) -> None:
+        first = self.service.download_course(self.course.id)
+        self.assertEqual(1, first.succeeded)
+        with self.courses.database.connect() as connection:
+            connection.execute(
+                "DELETE FROM artifacts WHERE lesson_id = ?", (self.lesson.id,)
+            )
+        resolver = mock.Mock()
+        service = DownloadService(
+            paths=self.paths,
+            courses=self.courses,
+            lessons=self.lessons,
+            resolver=resolver,
+            selector=MediaSelector(),
+            downloader=AudioDownloader(ffmpeg=ffmpeg_executable(), show_progress=False),
+        )
+
+        recovered = service.download_course(self.course.id)
+
+        self.assertEqual(1, recovered.skipped)
+        resolver.resolve.assert_not_called()
+        self.assertIsNotNone(self.lessons.audio_artifact(self.lesson.id))
+
     def test_browser_interruption_aborts_batch_without_recording_download_failure(self) -> None:
         resolver = mock.Mock()
         resolver.resolve.side_effect = BrowserError("ego_user_control", "Agent control stopped.")

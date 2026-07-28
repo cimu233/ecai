@@ -1,6 +1,7 @@
 """Lesson download orchestration and persistent state transitions."""
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Optional
@@ -10,7 +11,7 @@ from .config import AppPaths
 from .downloader import AudioDownloader, write_download_metadata
 from .media import DownloadError, DownloadRequest, MediaResolver, MediaSelector
 from .models import DownloadBatchResult, DownloadItemResult, Lesson
-from .progress import finish_progress
+from .progress import ProgressSpinner, finish_progress
 from .services import CourseService, LessonService
 
 
@@ -49,6 +50,8 @@ class DownloadService:
         items = []
         for idx, lesson in enumerate(lessons, 1):
             existing = self.lessons.audio_artifact(lesson.id)
+            if existing is None:
+                existing = self._recover_local_artifact(lesson)
             if existing is not None and self._artifact_is_valid(existing):
                 items.append(
                     DownloadItemResult(
@@ -65,7 +68,7 @@ class DownloadService:
                     )
                 continue
             self.downloader.set_progress_context(idx, total)
-            item = self._download_lesson(lesson)
+            item = self._download_lesson(lesson, idx, total)
             items.append(item)
             if self.downloader.show_progress and item.status != "audio_ready":
                 label = {
@@ -95,18 +98,23 @@ class DownloadService:
             items=items,
         )
 
-    def _download_lesson(self, lesson: Lesson) -> DownloadItemResult:
+    def _download_lesson(
+        self, lesson: Lesson, progress_index: int = 0, progress_total: int = 0
+    ) -> DownloadItemResult:
         self.lessons.begin_attempt(lesson.id)
         for force_refresh in (False, True):
             try:
-                source = self.selector.select(self.resolver.resolve(lesson, force_refresh=force_refresh))
+                with ProgressSpinner(
+                    "  [{}/{}] 正在解析音频源：{}".format(
+                        progress_index, progress_total, lesson.title[:32]
+                    ),
+                    enabled=None if self.downloader.show_progress else False,
+                ):
+                    source = self.selector.select(
+                        self.resolver.resolve(lesson, force_refresh=force_refresh)
+                    )
                 self.lessons.set_status(lesson.id, "downloading")
-                output_dir = (
-                    self.paths.courses_dir
-                    / self._safe_component(lesson.course_id)
-                    / "lessons"
-                    / self._safe_component(lesson.id)
-                )
+                output_dir = self._lesson_output_dir(lesson)
                 result = self.downloader.download(
                     DownloadRequest(lesson=lesson, source=source, output_dir=output_dir),
                     on_stage=lambda stage: self.lessons.set_status(lesson.id, stage),
@@ -166,13 +174,49 @@ class DownloadService:
     @staticmethod
     def _artifact_is_valid(row: object) -> bool:
         path = Path(row["file_path"])
-        if not path.is_file() or path.stat().st_size != row["size_bytes"]:
-            return False
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            while True:
-                chunk = handle.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-        return digest.hexdigest() == row["checksum"]
+        return (
+            path.is_file()
+            and int(row["size_bytes"] or 0) > 0
+            and path.stat().st_size == row["size_bytes"]
+        )
+
+    def _lesson_output_dir(self, lesson: Lesson) -> Path:
+        return (
+            self.paths.courses_dir
+            / self._safe_component(lesson.course_id)
+            / "lessons"
+            / self._safe_component(lesson.id)
+        )
+
+    def _recover_local_artifact(self, lesson: Lesson) -> Optional[object]:
+        output_dir = self._lesson_output_dir(lesson)
+        metadata_path = output_dir / "download.json"
+        if not metadata_path.is_file():
+            return None
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            file_name = str(metadata["file"])
+            candidate = output_dir / file_name
+            size_bytes = int(metadata["size_bytes"])
+            checksum = str(metadata["sha256"])
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if (
+            candidate.parent != output_dir
+            or not candidate.name.startswith("audio.source.")
+            or not candidate.is_file()
+            or size_bytes <= 0
+            or candidate.stat().st_size != size_bytes
+            or len(checksum) != 64
+        ):
+            return None
+        self.lessons.record_audio_artifact(
+            lesson_id=lesson.id,
+            file_path=str(candidate),
+            checksum=checksum,
+            size_bytes=size_bytes,
+            duration_seconds=metadata.get("duration_seconds"),
+            container=str(metadata.get("container") or candidate.suffix.lstrip(".")),
+            codec=metadata.get("codec"),
+        )
+        return self.lessons.audio_artifact(lesson.id)

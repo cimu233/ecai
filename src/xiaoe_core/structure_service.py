@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import StructureBatchResult, StructureItemResult
-from .progress import finish_progress, update_progress
+from .progress import ProgressSpinner, finish_progress
 from .services import CourseService, LessonService
 from .structurer import StructureError, StructureProvider, render_markdown
 
@@ -34,13 +34,13 @@ class StructureService:
         items = []
         total = len(lessons)
         for index, lesson in enumerate(lessons, 1):
-            if self.show_progress:
-                update_progress(
-                    "  [{}/{}] 结构化整理：{}".format(
-                        index, total, lesson.title[:40]
-                    )
-                )
-            item = self._structure_lesson(lesson.id, lesson.title, force)
+            with ProgressSpinner(
+                "  [{}/{}] 结构化整理：{}".format(
+                    index, total, lesson.title[:40]
+                ),
+                enabled=None if self.show_progress else False,
+            ):
+                item = self._structure_lesson(lesson.id, lesson.title, force)
             items.append(item)
             if self.show_progress:
                 label = {
