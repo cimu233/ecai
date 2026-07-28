@@ -3,6 +3,8 @@
 import json
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -12,6 +14,8 @@ from .browser import BrowserError, classify_xiaoe_page
 EGO_TASK_NAME = "xiaoe audio pipeline"
 EGO_MARKER = "__XIAOE_EGO_JSON__"
 EGO_FALLBACK_PATH = Path.home() / ".local" / "bin" / "ego-browser"
+EGO_MAC_APP = Path("/Applications/ego lite.app")
+EGO_MAC_EXECUTABLE = EGO_MAC_APP / "Contents" / "MacOS" / "ego lite"
 
 
 def resolve_ego_cli() -> Path:
@@ -26,9 +30,66 @@ class EgoCli:
         self,
         executable: Optional[Path] = None,
         runner: Optional[Callable[[str], Dict[str, Any]]] = None,
+        process_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+        sleeper: Callable[[float], None] = time.sleep,
+        platform: str = sys.platform,
+        app_executable: Path = EGO_MAC_EXECUTABLE,
     ) -> None:
         self.executable = executable or resolve_ego_cli()
         self.runner = runner
+        self.process_runner = process_runner
+        self.sleeper = sleeper
+        self.platform = platform
+        self.app_executable = app_executable
+
+    def ensure_browser_running(
+        self,
+        timeout: float = 15.0,
+        poll_interval: float = 0.25,
+    ) -> Dict[str, bool]:
+        """Start the installed Ego app in the background when its process is absent."""
+        if self.platform != "darwin":
+            return {"running": True, "started": False, "managed": False}
+        if not self.app_executable.is_file():
+            raise BrowserError(
+                "ego_app_missing",
+                "Ego Lite was not found in /Applications.",
+            )
+        if self._is_browser_running():
+            return {"running": True, "started": False, "managed": True}
+
+        try:
+            completed = self.process_runner(
+                ["/usr/bin/open", "-gj", "-a", "ego lite"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as error:
+            raise BrowserError("ego_start_failed", "Ego Lite could not be started.") from error
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            raise BrowserError("ego_start_failed", detail or "Ego Lite could not be started.")
+
+        interval = max(0.05, poll_interval)
+        attempts = max(1, int(max(0.0, timeout) / interval))
+        for _ in range(attempts):
+            if self._is_browser_running():
+                return {"running": True, "started": True, "managed": True}
+            self.sleeper(interval)
+        raise BrowserError("ego_start_timeout", "Ego Lite did not become ready within the timeout.")
+
+    def _is_browser_running(self) -> bool:
+        try:
+            completed = self.process_runner(
+                ["/usr/bin/pgrep", "-f", str(self.app_executable)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except OSError:
+            return False
+        return completed.returncode == 0
 
     def run(self, script: str, timeout: float = 60.0) -> Any:
         if self.runner is not None:
@@ -36,6 +97,7 @@ class EgoCli:
             if "error" in result:
                 raise BrowserError("ego_error", str(result["error"]))
             return result.get("value")
+        self.ensure_browser_running()
         if not self.executable.is_file():
             raise BrowserError(
                 "ego_missing",
@@ -146,6 +208,9 @@ class EgoBrowserManager:
         self.cli = cli or EgoCli()
         self.task_name = task_name
         self.task_id: Optional[int] = None
+
+    def ensure_application_running(self) -> Dict[str, bool]:
+        return self.cli.ensure_browser_running()
 
     def ensure_running(self, visible: bool = False, initial_url: str = "about:blank") -> str:
         action = ""

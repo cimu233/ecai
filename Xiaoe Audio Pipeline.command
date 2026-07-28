@@ -86,6 +86,13 @@ fi
 
 cd "$project_dir" || exit 1
 
+if ! run_xiaoe browser ensure; then
+  echo ""
+  echo "Ego 浏览器启动失败，请确认 /Applications/ego lite.app 可以正常打开。"
+  pause_screen
+  exit 1
+fi
+
 while true; do
   clear
   cat <<'MENU'
@@ -177,7 +184,9 @@ MENU
             run_xiaoe browser use edge
           fi
           ;;
-        3) run_xiaoe browser use ego ;;
+        3)
+          run_xiaoe browser use ego && run_xiaoe browser ensure
+          ;;
         *) echo "无效选项，配置未改变。" ;;
       esac
       pause_screen

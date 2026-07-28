@@ -74,6 +74,27 @@ class CliTest(unittest.TestCase):
         self.assertIn("当前浏览器：Chrome", output)
         self.assertNotIn("{", output)
 
+    def test_browser_ensure_starts_selected_ego(self) -> None:
+        self.invoke(["browser", "use", "ego", "--json"])
+        manager = mock.Mock()
+        manager.ensure_application_running.return_value = {
+            "running": True,
+            "started": True,
+            "managed": True,
+        }
+        with mock.patch("xiaoe_cli.main.EgoBrowserManager", return_value=manager):
+            exit_code, output, errors = self.invoke(["browser", "ensure", "--json"])
+        self.assertEqual(0, exit_code, errors)
+        self.assertTrue(json.loads(output)["started"])
+        manager.ensure_application_running.assert_called_once_with()
+
+    def test_browser_ensure_ignores_non_ego_selection(self) -> None:
+        with mock.patch("xiaoe_cli.main.EgoBrowserManager") as manager_class:
+            exit_code, output, errors = self.invoke(["browser", "ensure", "--json"])
+        self.assertEqual(0, exit_code, errors)
+        self.assertFalse(json.loads(output)["managed"])
+        manager_class.assert_not_called()
+
     def test_catalog_text_output_contains_titles_without_json(self) -> None:
         lesson = mock.Mock(position=1, title="第一讲")
         output = io.StringIO()

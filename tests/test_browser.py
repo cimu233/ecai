@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from xiaoe_core.browser import ChromeManager, EdgeManager, classify_xiaoe_page, cookie_header
 from xiaoe_core.ego_browser import EGO_MARKER, EgoCli
@@ -40,6 +41,46 @@ class BrowserHelpersTest(unittest.TestCase):
     def test_ego_output_parser_reads_stderr_marker(self):
         output = "warning\n{}{}\n".format(EGO_MARKER, '{"status":"ok"}')
         self.assertEqual({"status": "ok"}, EgoCli._extract_value(output))
+
+    def test_ego_running_process_is_reused(self):
+        process_runner = mock.Mock(return_value=mock.Mock(returncode=0))
+        cli = EgoCli(
+            process_runner=process_runner,
+            platform="darwin",
+            app_executable=Path(__file__),
+        )
+
+        result = cli.ensure_browser_running()
+
+        self.assertEqual({"running": True, "started": False, "managed": True}, result)
+        process_runner.assert_called_once()
+        self.assertEqual("/usr/bin/pgrep", process_runner.call_args.args[0][0])
+
+    def test_ego_is_launched_in_background_when_process_is_absent(self):
+        process_runner = mock.Mock(
+            side_effect=[
+                mock.Mock(returncode=1),
+                mock.Mock(returncode=0, stdout="", stderr=""),
+                mock.Mock(returncode=1),
+                mock.Mock(returncode=0),
+            ]
+        )
+        sleeper = mock.Mock()
+        cli = EgoCli(
+            process_runner=process_runner,
+            sleeper=sleeper,
+            platform="darwin",
+            app_executable=Path(__file__),
+        )
+
+        result = cli.ensure_browser_running(timeout=1.0, poll_interval=0.1)
+
+        self.assertEqual({"running": True, "started": True, "managed": True}, result)
+        self.assertEqual(
+            ["/usr/bin/open", "-gj", "-a", "ego lite"],
+            process_runner.call_args_list[1].args[0],
+        )
+        sleeper.assert_called_once_with(0.1)
 
 
 if __name__ == "__main__":

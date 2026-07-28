@@ -216,6 +216,8 @@ def build_parser() -> argparse.ArgumentParser:
     browser_commands = browser_parser.add_subparsers(dest="browser_command", required=True)
     browser_current = browser_commands.add_parser("current", help="Show the selected browser")
     browser_current.add_argument("--json", action="store_true", dest="as_json")
+    browser_ensure = browser_commands.add_parser("ensure", help="Start Ego when it is the selected browser")
+    browser_ensure.add_argument("--json", action="store_true", dest="as_json")
     browser_use = browser_commands.add_parser("use", help="Persist the selected browser")
     browser_use.add_argument("backend", choices=["chrome", "edge", "ego", "playwright-chrome", "playwright-edge"])
     browser_use.add_argument("--json", action="store_true", dest="as_json")
@@ -389,10 +391,21 @@ def run(arguments: argparse.Namespace) -> int:
         settings = AppSettings(paths.settings_file)
         if arguments.browser_command == "use":
             settings.save_browser(arguments.backend)
-        payload = {"browser": settings.browser()}
+        selected = settings.browser()
+        payload = {"browser": selected}
+        if arguments.browser_command == "ensure":
+            if selected == "ego":
+                payload.update(EgoBrowserManager().ensure_application_running())
+            else:
+                payload.update({"running": True, "started": False, "managed": False})
         if arguments.as_json:
             emit(payload, True)
-        else:
+        elif arguments.browser_command == "ensure" and selected == "ego":
+            if payload["started"]:
+                print("Ego 浏览器未运行，已在后台启动。")
+            else:
+                print("Ego 浏览器已运行。")
+        elif arguments.browser_command != "ensure":
             print("当前浏览器：{}".format(browser_label(payload["browser"])))
         return 0
 
