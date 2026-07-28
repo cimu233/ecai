@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 
-DEFAULT_AUTH_URL = "https://study.xiaoe-tech.com/#/acount"
+DEFAULT_AUTH_URL = "https://study.xiaoe-tech.com/t_l/learnIndex#/muti_index"
 
 
 # Placeholders so mock.patch can target these names at module level.
@@ -17,6 +17,7 @@ DEFAULT_AUTH_URL = "https://study.xiaoe-tech.com/#/acount"
 AppPaths = None  # type: ignore[assignment]
 AppSettings = None  # type: ignore[assignment]
 XIAOE_LOGIN_URL = None  # type: ignore[assignment]
+XIAOE_SESSION_CHECK_URL = None  # type: ignore[assignment]
 XiaoeCredentialStore = None  # type: ignore[assignment]
 XiaoePasswordLogin = None  # type: ignore[assignment]
 AsrProvider = None  # type: ignore[assignment]
@@ -56,6 +57,7 @@ def _lazy_imports() -> None:
     _import_if_none("AppPaths", "xiaoe_core.config", "AppPaths")
     _import_if_none("AppSettings", "xiaoe_core.config", "AppSettings")
     _import_if_none("XIAOE_LOGIN_URL", "xiaoe_core.auth", "XIAOE_LOGIN_URL")
+    _import_if_none("XIAOE_SESSION_CHECK_URL", "xiaoe_core.auth", "XIAOE_SESSION_CHECK_URL")
     _import_if_none("XiaoeCredentialStore", "xiaoe_core.auth", "XiaoeCredentialStore")
     _import_if_none("XiaoePasswordLogin", "xiaoe_core.auth", "XiaoePasswordLogin")
     _import_if_none("AsrProvider", "xiaoe_core.asr", "AsrProvider")
@@ -460,7 +462,7 @@ def run(arguments: argparse.Namespace) -> int:
                 )
                 return 3
             attempt = XiaoePasswordLogin(chrome).attempt(credentials)
-            check_url = XIAOE_LOGIN_URL
+            check_url = XIAOE_SESSION_CHECK_URL
             if attempt.get("challenge") and attempt.get("handed_off"):
                 emit_auth(
                     {

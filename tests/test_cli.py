@@ -119,7 +119,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("语音转文字：处理 1，成功 1", output.getvalue())
         self.assertNotIn("{", output.getvalue())
 
-    def test_auth_check_defaults_to_latest_saved_course(self) -> None:
+    def test_auth_check_defaults_to_dedicated_session_page(self) -> None:
         paths = AppPaths.resolve(self.temp_dir.name)
         service = CourseService(Database(paths.database_file))
         self.assertEqual(DEFAULT_AUTH_URL, resolve_auth_check_url(service, None))
@@ -193,7 +193,7 @@ class CliTest(unittest.TestCase):
         payload = json.loads(output)
         self.assertEqual("completed", payload["login"])
         self.assertEqual("file", payload["credential_source"])
-        self.assertEqual("https://study.xiaoe-tech.com/#/acount", payload["checked_url"])
+        self.assertEqual("https://study.xiaoe-tech.com/t_l/learnIndex#/muti_index", payload["checked_url"])
         login.attempt.assert_called_once()
 
     def test_auth_recovery_verifies_course_after_password_submission(self) -> None:

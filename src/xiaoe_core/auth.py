@@ -12,6 +12,7 @@ from .secrets import MacKeychainSecretStore
 
 
 XIAOE_LOGIN_URL = "https://study.xiaoe-tech.com/#/acount"
+XIAOE_SESSION_CHECK_URL = "https://study.xiaoe-tech.com/t_l/learnIndex#/muti_index"
 XIAOE_USERNAME_ACCOUNT = "xiaoe.login.username"
 XIAOE_PASSWORD_ACCOUNT = "xiaoe.login.password"
 
