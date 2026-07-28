@@ -212,9 +212,15 @@ const spaces = await listTaskSpaces()
 const existing = spaces.find(space =>
   space.name === {task_name} || space.taskId === {task_name}
 )
-const task = existing && existing.ownership !== 'agent'
-  ? await claimTaskSpace(existing.id)
-  : await useOrCreateTaskSpace({task_name})
+let task
+if (existing && existing.ownership === 'agentDelegatedToUser') {{
+  await takeOverTaskSpace(existing.id)
+  task = existing
+}} else if (existing && existing.ownership !== 'agent') {{
+  task = await claimTaskSpace(existing.id)
+}} else {{
+  task = await useOrCreateTaskSpace({task_name})
+}}
 const tabs = await listTabs()
 for (const tab of tabs) {{
   const url = String(tab.url || '')

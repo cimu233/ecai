@@ -111,7 +111,7 @@ class XiaoeCatalogService:
             raw_path.parent.mkdir(parents=True, exist_ok=True)
             self._atomic_json(raw_path, {"course_url": course.source_url, "items": items})
         except BrowserError as error:
-            if error.code == "login_required" or not raw_path.is_file():
+            if error.code in {"login_required", "ego_user_control"} or not raw_path.is_file():
                 raise
             items = self._cached_items(raw_path)
             if not items:

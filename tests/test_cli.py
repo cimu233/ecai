@@ -13,6 +13,7 @@ from xiaoe_cli.main import (
     inspect_saved_session,
     main,
     resolve_auth_check_url,
+    run_with_ego_resume,
 )
 from xiaoe_core.auth import XiaoeCredentials
 from xiaoe_core.browser import BrowserError
@@ -190,6 +191,44 @@ class CliTest(unittest.TestCase):
             self.assertEqual(authenticated, inspect_saved_session(chrome, "https://example.com/course"))
         self.assertEqual(2, inspect.call_count)
         self.assertEqual(2, page.close.call_count)
+
+    def test_interactive_ego_run_waits_then_reclaims_and_resumes(self) -> None:
+        browser = mock.Mock(browser_name="ego")
+        operation = mock.Mock(
+            side_effect=[
+                BrowserError("ego_user_control", "Agent control stopped."),
+                "completed",
+            ]
+        )
+        input_fn = mock.Mock(return_value="")
+        errors = io.StringIO()
+
+        with contextlib.redirect_stderr(errors):
+            result = run_with_ego_resume(
+                operation, browser, interactive=True, input_fn=input_fn
+            )
+
+        self.assertEqual("completed", result)
+        self.assertEqual(2, operation.call_count)
+        input_fn.assert_called_once()
+        browser.ensure_running.assert_called_once_with(visible=False)
+        self.assertIn("当前课程进度已经保留", errors.getvalue())
+        self.assertIn("继续当前任务", errors.getvalue())
+
+    def test_noninteractive_ego_run_returns_control_error_without_waiting(self) -> None:
+        browser = mock.Mock(browser_name="ego")
+        operation = mock.Mock(
+            side_effect=BrowserError("ego_user_control", "Agent control stopped.")
+        )
+        input_fn = mock.Mock()
+
+        with self.assertRaises(BrowserError):
+            run_with_ego_resume(
+                operation, browser, interactive=False, input_fn=input_fn
+            )
+
+        input_fn.assert_not_called()
+        browser.ensure_running.assert_not_called()
 
     def test_auth_recovery_requests_private_file_when_credentials_are_missing(self) -> None:
         browser = mock.Mock()

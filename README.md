@@ -250,6 +250,12 @@ Automated tests cover database migration, paginated course selection, Chrome ses
 
 The authorized Xiaoe course catalog, paginated picker, media-source capture, download start, and local Qwen inference have been live-tested. Cloud ASR and structuring adapters have protocol-level tests; each cloud service still needs a first live request with your own credential. Codex and Claude Code executable availability is checked locally; their first real structuring job uses the login already held by each CLI. Interactive login challenges still require user action when Xiaoe expires the saved session.
 
+When a user stops the dedicated Ego Agent during an interactive course run, the
+CLI preserves completed artifacts and pauses at the current task. Finish the
+browser action and press Enter in the CLI to reclaim the same Ego Task Space and
+resume. JSON and other non-interactive runs return the control error immediately
+so unattended callers never wait for terminal input.
+
 ## Safety
 
 Use this project only with content you own or are explicitly authorized to download. Runtime files, browser profile data, cookies, media, transcripts, and notes are excluded from Git.

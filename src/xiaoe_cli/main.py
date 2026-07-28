@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 
 DEFAULT_AUTH_URL = "https://study.xiaoe-tech.com/t_l/learnIndex#/muti_index"
@@ -416,6 +416,37 @@ def inspect_saved_session(chrome: Any, url: str) -> dict:
         finally:
             page.close()
     raise RuntimeError("Saved Chrome session could not be inspected.")
+
+
+def run_with_ego_resume(
+    operation: Callable[[], Any],
+    browser: Any,
+    interactive: bool,
+    input_fn: Callable[[str], str] = input,
+) -> Any:
+    while True:
+        try:
+            return operation()
+        except BrowserError as error:
+            resumable = (
+                error.code == "ego_user_control"
+                and getattr(browser, "browser_name", "") == "ego"
+                and interactive
+            )
+            if not resumable:
+                raise
+            print(
+                "\nEgo Agent 已暂停，当前课程进度已经保留。",
+                file=sys.stderr,
+            )
+            try:
+                input_fn("请完成 Ego 中的操作，回到这里按 Enter 继续...")
+            except (EOFError, KeyboardInterrupt) as interrupted:
+                raise BrowserError(
+                    "ego_resume_cancelled", "用户取消了 Ego 任务恢复。"
+                ) from interrupted
+            browser.ensure_running(visible=False)
+            print("已重新认领 Ego 空间，继续当前任务。", file=sys.stderr)
 
 
 def build_browser_manager(arguments: argparse.Namespace, paths: AppPaths) -> Any:
@@ -993,7 +1024,7 @@ def run(arguments: argparse.Namespace) -> int:
             arguments.structure_effort,
         )
         chrome = build_browser_manager(arguments, paths)
-        XiaoeCatalogService(paths, service, lessons, chrome).refresh(arguments.course_id)
+        catalog = XiaoeCatalogService(paths, service, lessons, chrome)
         downloads = DownloadService(
             paths=paths,
             courses=service,
@@ -1009,12 +1040,21 @@ def run(arguments: argparse.Namespace) -> int:
             provider,
         )
         structures = StructureService(service, lessons, structure_provider)
-        result = PipelineRunner(downloads, transcriptions, structures).run(
-            arguments.course_id,
-            lesson_id=arguments.lesson_id,
-            limit=arguments.limit,
-            force_transcription=arguments.force_transcription,
-            force_structure=arguments.force_structure,
+
+        def execute_pipeline() -> Any:
+            catalog.refresh(arguments.course_id)
+            return PipelineRunner(downloads, transcriptions, structures).run(
+                arguments.course_id,
+                lesson_id=arguments.lesson_id,
+                limit=arguments.limit,
+                force_transcription=arguments.force_transcription,
+                force_structure=arguments.force_structure,
+            )
+
+        result = run_with_ego_resume(
+            execute_pipeline,
+            chrome,
+            interactive=not arguments.as_json and sys.stdin.isatty(),
         )
         emit_pipeline_result(result, arguments.as_json)
         return 0 if result.status == "completed" else 1

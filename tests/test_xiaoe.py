@@ -3,9 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from xiaoe_core.browser import BrowserError
 from xiaoe_core.config import AppPaths
 from xiaoe_core.database import Database
-from xiaoe_core.services import CourseService
+from xiaoe_core.services import CourseService, LessonService
 from xiaoe_core.xiaoe import (
     XiaoeAccountCatalogService,
     XiaoeBrowserMediaResolver,
@@ -91,6 +92,45 @@ class XiaoeParsingTest(unittest.TestCase):
 
 
 class XiaoeAccountCatalogServiceTest(unittest.TestCase):
+    def test_cached_catalog_does_not_hide_ego_control_pause(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = AppPaths.resolve(directory)
+            paths.create()
+            database = Database(paths.database_file)
+            courses = CourseService(database)
+            lessons = LessonService(database)
+            course = courses.add_course(
+                "https://store.example.com/p/course/course_1", "Course"
+            ).course
+            raw_path = paths.courses_dir / course.id / "catalog.raw.json"
+            raw_path.parent.mkdir(parents=True)
+            raw_path.write_text(
+                json.dumps(
+                    {
+                        "items": [
+                            {
+                                "resource_id": "lesson_1",
+                                "jump_url": "/lesson/1",
+                                "title": "Cached lesson",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            class PausedBrowser:
+                def ensure_running(self, visible=False):
+                    return "11"
+
+                def capture_catalog(self, url, expression, wait_seconds):
+                    raise BrowserError("ego_user_control", "Agent control stopped.")
+
+            with self.assertRaises(BrowserError):
+                XiaoeCatalogService(
+                    paths, courses, lessons, PausedBrowser()
+                ).refresh(course.id)
+
     def test_scan_imports_course_containers_and_deduplicates_existing_course(self):
         with tempfile.TemporaryDirectory() as directory:
             paths = AppPaths.resolve(directory)

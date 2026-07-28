@@ -81,6 +81,7 @@ class BrowserHelpersTest(unittest.TestCase):
 
         self.assertEqual("11", manager.ensure_running())
         self.assertIn("claimTaskSpace(existing.id)", scripts[0])
+        self.assertIn("takeOverTaskSpace(existing.id)", scripts[0])
         self.assertIn("diting.bytedance.com", scripts[0])
 
     def test_media_capture_always_cleans_tabs_created_by_playback(self):
