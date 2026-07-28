@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
+from .auth import XIAOE_SESSION_CHECK_URL
 from .browser import BrowserError, cookie_header, inspect_page
 from .config import AppPaths
 from .media import DIRECT_AUDIO_SUFFIXES, DownloadError, MediaSource, StoredUrlResolver
@@ -519,12 +520,33 @@ class XiaoeBrowserMediaResolver:
             finally:
                 page.close()
             cookies = self.chrome.cookies(endpoint)
-        if state["status"] == "login_required":
-            raise DownloadError("source_expired", "Xiaoe login has expired.")
         urls = self._media_urls(events)
-        if not urls:
-            raise DownloadError("source_unavailable", "No playable audio or HLS request was observed.")
-        return [self._source(url, lesson.source_url, cookies) for url in urls]
+        if urls:
+            return [self._source(url, lesson.source_url, cookies) for url in urls]
+        has_player_evidence = bool(
+            state.get("mediaPlayer") or state.get("playbackObserved")
+        )
+        if state["status"] == "login_required" and not has_player_evidence:
+            account_state = self._check_account_session()
+            if account_state == "authenticated":
+                raise DownloadError(
+                    "source_unavailable",
+                    "The Xiaoe account session is valid, but this lesson exposed no playable media source.",
+                )
+            raise DownloadError("source_expired", "Xiaoe login has expired.")
+        if has_player_evidence:
+            raise DownloadError(
+                "source_unavailable",
+                "A playable media control was detected, but its source URL could not be extracted.",
+            )
+        raise DownloadError("source_unavailable", "No playable audio or HLS request was observed.")
+
+    def _check_account_session(self) -> Optional[str]:
+        checker = getattr(self.chrome, "check_auth", None)
+        if not callable(checker):
+            return None
+        result = checker(XIAOE_SESSION_CHECK_URL)
+        return str(result.get("status") or "") if isinstance(result, dict) else None
 
     def _trigger_playback(self, page: Any, total_wait: float) -> List[Dict[str, Any]]:
         """Trigger playback while returning as soon as a media URL appears."""

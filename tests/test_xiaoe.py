@@ -7,6 +7,7 @@ from unittest import mock
 from xiaoe_core.browser import BrowserError
 from xiaoe_core.config import AppPaths
 from xiaoe_core.database import Database
+from xiaoe_core.media import DownloadError
 from xiaoe_core.services import CourseService, LessonService
 from xiaoe_core.models import Lesson
 from xiaoe_core.xiaoe import (
@@ -131,6 +132,98 @@ class XiaoeParsingTest(unittest.TestCase):
         )
 
         browser.invalidate_gateway.assert_not_called()
+
+    def test_media_url_outweighs_stale_login_classification(self):
+        browser = mock.Mock()
+        browser.capture_media.return_value = {
+            "state": {"status": "login_required", "mediaPlayer": False},
+            "events": [{
+                "method": "Network.responseReceived",
+                "params": {"response": {
+                    "url": "https://cdn.example.com/audio.mp3?sign=fresh",
+                    "mimeType": "audio/mpeg",
+                }},
+            }],
+            "cookies": [],
+        }
+        lesson = Lesson(
+            id="lesson_media",
+            course_id="course_1",
+            position=1,
+            title="Playable",
+            source_url="https://school.example.com/lesson/1",
+            status="pending_source",
+            error=None,
+            attempt_count=0,
+            last_error_code=None,
+            last_error_at=None,
+            created_at="2026-01-01",
+            updated_at="2026-01-01",
+        )
+
+        sources = XiaoeBrowserMediaResolver(browser).resolve(lesson)
+
+        self.assertEqual("direct_audio", sources[0].kind)
+
+    def test_login_failure_requires_no_media_or_player_evidence(self):
+        lesson = Lesson(
+            id="lesson_login",
+            course_id="course_1",
+            position=1,
+            title="Login",
+            source_url="https://school.example.com/lesson/1",
+            status="pending_source",
+            error=None,
+            attempt_count=0,
+            last_error_code=None,
+            last_error_at=None,
+            created_at="2026-01-01",
+            updated_at="2026-01-01",
+        )
+        browser = mock.Mock()
+        browser.capture_media.return_value = {
+            "state": {"status": "login_required", "mediaPlayer": False},
+            "events": [],
+            "cookies": [],
+        }
+        browser.check_auth.return_value = {"status": "login_required"}
+
+        with self.assertRaisesRegex(DownloadError, "login has expired"):
+            XiaoeBrowserMediaResolver(browser).resolve(lesson)
+
+        browser.capture_media.return_value["state"]["mediaPlayer"] = True
+        with self.assertRaisesRegex(DownloadError, "source URL could not be extracted"):
+            XiaoeBrowserMediaResolver(browser).resolve(lesson)
+
+    def test_valid_account_session_downgrades_lesson_login_false_positive(self):
+        lesson = Lesson(
+            id="lesson_account_ok",
+            course_id="course_1",
+            position=1,
+            title="Unavailable lesson",
+            source_url="https://school.example.com/lesson/1",
+            status="pending_source",
+            error=None,
+            attempt_count=0,
+            last_error_code=None,
+            last_error_at=None,
+            created_at="2026-01-01",
+            updated_at="2026-01-01",
+        )
+        browser = mock.Mock()
+        browser.capture_media.return_value = {
+            "state": {"status": "login_required", "mediaPlayer": False},
+            "events": [],
+            "cookies": [],
+        }
+        browser.check_auth.return_value = {"status": "authenticated"}
+
+        with self.assertRaisesRegex(DownloadError, "account session is valid"):
+            XiaoeBrowserMediaResolver(browser).resolve(lesson)
+
+        browser.check_auth.assert_called_once_with(
+            "https://study.xiaoe-tech.com/t_l/learnIndex#/muti_index"
+        )
 
     def test_catalog_position_prefers_global_sort_value(self):
         item = {"sort_value": "49", "sort_c": "1"}

@@ -219,6 +219,7 @@ Desktop menu item 1 runs `auth login` directly and never asks for a course URL.
 - Account discovery reads the authorized “我的课程” list and imports columns, large columns, camps, memberships, and course catalogs.
 - Course discovery listens to authorized page JSON responses and uses Xiaoe `resource_id` as the stable lesson key.
 - Catalog metadata classifies lessons as text, audio, video, live replay, or probe-required. Explicit text/no-replay items skip browser, ASR, and structuring waits immediately; unknown legacy types still use browser detection.
+- A suspected login failure is confirmed against the Xiaoe learning-center account page. Valid media/player evidence wins, and a lesson-specific capture failure does not invalidate the whole account session.
 - Collapsed catalog chapters are expanded in bounded batches, and the active browser tab and authenticated Gateway are reused across the course run.
 - Direct audio preserves original bytes and supports HTTP Range resume.
 - HLS prefers an independent audio rendition; mixed video streams are reduced to their first audio track.

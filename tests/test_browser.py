@@ -45,6 +45,17 @@ class BrowserHelpersTest(unittest.TestCase):
             ),
         )
 
+    def test_media_player_outweighs_login_words_in_course_copy(self):
+        self.assertEqual(
+            "authenticated",
+            classify_xiaoe_page(
+                "https://example.com/p/course/video/v_123",
+                "登录后观看",
+                has_login_challenge=True,
+                has_media_player=True,
+            ),
+        )
+
     def test_cookie_header_only_contains_matching_domains(self):
         cookies = [
             {"name": "session", "value": "one", "domain": ".xiaoe-tech.com"},
@@ -117,8 +128,10 @@ class BrowserHelpersTest(unittest.TestCase):
         self.assertIn("parsed.searchParams.values()", scripts[0])
         self.assertIn("await click([playback.clickPoint.x", scripts[0])
         self.assertIn("audio\\.info\\.get", scripts[0])
+        self.assertIn("get_lookback_list", scripts[0])
         self.assertIn("performance.clearResourceTimings()", scripts[0])
         self.assertIn("if (currentUrl !== requestedUrl || true)", scripts[0])
+        self.assertIn("playbackObserved", scripts[0])
 
     def test_catalog_capture_keeps_reusable_tab_and_cleans_spawned_tabs(self):
         scripts = []

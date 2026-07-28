@@ -251,6 +251,9 @@ const state = await js(String.raw`({{
   url: location.href,
   title: document.title,
   body: (document.body && document.body.innerText || '').slice(0, 12000),
+  mediaPlayer: !!document.querySelector(
+    'audio, video, .xgplayer, .video-js, .dplayer, [class*="audio-player"], [class*="video-player"]'
+  ),
   loginChallenge: !!document.querySelector(
     '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
   )
@@ -409,7 +412,7 @@ while (Date.now() < deadline) {{
   }})
   const apiFound = events.some(event =>
     event.method === 'Network.responseReceived' &&
-    /getPlayUrl|detail_info|get_play_info|audio\.info\.get/i.test(
+    /getPlayUrl|detail_info|audio\.info\.get|get_lookback_list/i.test(
       event.params && event.params.response && event.params.response.url || ''
     )
   )
@@ -430,6 +433,21 @@ const mediaEvents = events.filter(event => {{
   return mediaPattern.test(url) ||
     mime.includes('mpegurl') || mime.startsWith('audio/')
 }})
+const playbackEvidence = await js(String.raw`(() => {{
+  const media = [...document.querySelectorAll('audio,video')]
+  return {{
+    mediaPlayer: media.length > 0 || !!document.querySelector(
+      '.xgplayer, .video-js, .dplayer, [class*="audio-player"], [class*="video-player"]'
+    ),
+    playbackObserved: media.some(node =>
+      !node.paused ||
+      Number.isFinite(node.duration) ||
+      /^(?:blob:|https?:)/i.test(node.currentSrc || node.src || '')
+    )
+  }}
+}})()`)
+state.mediaPlayer = !!(state.mediaPlayer || playbackEvidence.mediaPlayer)
+state.playbackObserved = !!playbackEvidence.playbackObserved
 const discoveredUrls = []
 const collectMediaUrls = value => {{
   if (typeof value === 'string') {{
@@ -452,7 +470,7 @@ for (const entry of performanceEntries) {{
 }}
 const playInfoResponses = events.filter(event =>
   event.method === 'Network.responseReceived' &&
-  /getPlayUrl|detail_info|get_play_info|audio\.info\.get/i.test(
+  /getPlayUrl|detail_info|get_play_info|audio\.info\.get|get_lookback_list/i.test(
     event.params && event.params.response && event.params.response.url || ''
   )
 )
@@ -495,6 +513,7 @@ cliLog({marker} + JSON.stringify(captureResult))
             state.get("url", ""),
             state.get("body", ""),
             bool(state.get("loginChallenge")),
+            bool(state.get("mediaPlayer") or state.get("playbackObserved")),
         )
         if state["status"] == "authenticated":
             self.gateway_ready = True

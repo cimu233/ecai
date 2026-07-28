@@ -302,10 +302,18 @@ def cookie_header(cookies: List[Dict[str, Any]], host: str) -> str:
     return "; ".join(matching)
 
 
-def classify_xiaoe_page(url: str, body_text: str, has_login_challenge: bool = False) -> str:
+def classify_xiaoe_page(
+    url: str,
+    body_text: str,
+    has_login_challenge: bool = False,
+    has_media_player: bool = False,
+) -> str:
     lowered_url = url.lower()
     compact = " ".join(body_text.split())
-    if any(marker in lowered_url for marker in ("/login", "passport", "account.xiaoe", "#/acount", "#/account")):
+    if not has_media_player and any(
+        marker in lowered_url
+        for marker in ("/login", "passport", "account.xiaoe", "#/acount", "#/account")
+    ):
         return "login_required"
     login_markers = (
         "微信扫码登录",
@@ -320,7 +328,9 @@ def classify_xiaoe_page(url: str, body_text: str, has_login_challenge: bool = Fa
     challenge_context = has_login_challenge and any(
         marker in compact for marker in ("登录", "注册", "扫码", "微信")
     )
-    if challenge_context or any(marker in compact for marker in login_markers):
+    if not has_media_player and (
+        challenge_context or any(marker in compact for marker in login_markers)
+    ):
         return "login_required"
     if any(marker in compact for marker in ("无权访问", "暂无权限", "课程已下架", "内容已删除")):
         return "access_denied"
@@ -333,6 +343,9 @@ def inspect_page(page: CdpClient, wait_seconds: float = 3.0, preserve_events: bo
       title: document.title,
       body: (document.body && document.body.innerText || '').slice(0, 12000),
       ready: document.readyState !== 'loading',
+      mediaPlayer: !!document.querySelector(
+        'audio, video, .xgplayer, .video-js, .dplayer, [class*="audio-player"], [class*="video-player"]'
+      ),
       loginChallenge: !!document.querySelector(
         '[class*="qrcode"], [class*="qr-code"], img[src*="qrcode"], img[alt*="二维码"]'
       )
@@ -366,5 +379,6 @@ def inspect_page(page: CdpClient, wait_seconds: float = 3.0, preserve_events: bo
         state.get("url", ""),
         state.get("body", ""),
         bool(state.get("loginChallenge")),
+        bool(state.get("mediaPlayer")),
     )
     return state
