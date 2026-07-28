@@ -49,6 +49,8 @@ class DatabaseMigrationTest(unittest.TestCase):
             self.assertEqual(SCHEMA_VERSION, version)
             self.assertIn("attempt_count", lesson_columns)
             self.assertIn("last_error_code", lesson_columns)
+            self.assertIn("content_type", lesson_columns)
+            self.assertIn("media_hint", lesson_columns)
             self.assertIn("duration_seconds", artifact_columns)
             self.assertIn("codec", artifact_columns)
             self.assertEqual("Old Course", title)

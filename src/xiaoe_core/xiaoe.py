@@ -137,6 +137,7 @@ class XiaoeCatalogService:
                 or item.get("name")
                 or resource_id
             )
+            content_type, media_hint = classify_catalog_media(item)
             lessons.append(
                 self.lessons.upsert(
                     course.id,
@@ -144,6 +145,8 @@ class XiaoeCatalogService:
                     title,
                     source_url=urljoin(course.source_url, str(item.get("jump_url") or item.get("jumpUrl"))),
                     lesson_id="resource_{}".format(self._safe_id(resource_id)),
+                    content_type=content_type,
+                    media_hint=media_hint,
                 )
             )
         with self.courses.database.connect() as connection:
@@ -308,6 +311,46 @@ class XiaoeCatalogService:
         temporary = path.with_suffix(path.suffix + ".partial")
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(path)
+
+
+def classify_catalog_media(item: Dict[str, Any]) -> Tuple[str, str]:
+    """Return (content_type, media_hint) using explicit Xiaoe catalog fields."""
+    jump_url = str(item.get("jump_url") or item.get("jumpUrl") or "")
+    path = urlparse(jump_url).path.lower()
+    try:
+        resource_type = int(item.get("resource_type"))
+    except (TypeError, ValueError):
+        resource_type = 0
+
+    if resource_type == 1 or "/text/" in path:
+        return "text", "no_media"
+    if resource_type == 2 or "/audio/" in path or _positive_number(item.get("audio_length")):
+        return "audio", "has_media"
+    if resource_type == 3 or "/video/" in path or _positive_number(item.get("video_length")):
+        return "video", "has_media"
+    if resource_type == 4 or "/alive/" in path:
+        lookback = _optional_int(item.get("is_lookback"))
+        alive_status = _optional_int(item.get("alive_status"))
+        if lookback == 1 and alive_status == 3:
+            return "live_replay", "has_media"
+        if lookback == 0 and alive_status == 3:
+            return "live", "no_media"
+        return "live", "probe"
+    return "unknown", "probe"
+
+
+def _positive_number(value: Any) -> bool:
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class XiaoeAccountCatalogService:
@@ -596,7 +639,7 @@ class XiaoeBrowserMediaResolver:
 
     @staticmethod
     def _media_urls(events: Iterable[Dict[str, Any]]) -> List[str]:
-        urls = []
+        urls: Dict[Tuple[str, str, str], str] = {}
         for event in events:
             if event.get("method") != "Network.responseReceived":
                 continue
@@ -604,9 +647,12 @@ class XiaoeBrowserMediaResolver:
             url = str(response.get("url", ""))
             mime = str(response.get("mimeType", "")).lower()
             if MEDIA_PATTERN.search(url) or "mpegurl" in mime or mime.startswith("audio/"):
-                if url not in urls:
-                    urls.append(url)
-        return urls
+                parsed = urlparse(url)
+                key = (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path)
+                if key in urls:
+                    del urls[key]
+                urls[key] = url
+        return list(urls.values())
 
     @staticmethod
     def _source(url: str, page_url: str, browser_cookies: List[Dict[str, Any]]) -> MediaSource:

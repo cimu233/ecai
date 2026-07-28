@@ -60,6 +60,34 @@ class CourseServiceTest(unittest.TestCase):
         self.assertEqual(1, moved.position)
         self.assertEqual("Lesson updated", moved.title)
 
+    def test_media_hint_change_reactivates_previous_text_lesson(self) -> None:
+        course = self.service.add_course(
+            "https://school.example.com/course/1", "Course"
+        ).course
+        lessons = LessonService(self.service.database)
+        text = lessons.upsert(
+            course.id,
+            1,
+            "Announcement",
+            lesson_id="resource_1",
+            content_type="text",
+            media_hint="no_media",
+        )
+        self.assertEqual("no_media", text.status)
+
+        video = lessons.upsert(
+            course.id,
+            1,
+            "Video lesson",
+            lesson_id="resource_1",
+            content_type="video",
+            media_hint="has_media",
+        )
+
+        self.assertEqual("pending_source", video.status)
+        self.assertEqual("video", video.content_type)
+        self.assertEqual("has_media", video.media_hint)
+
 
 if __name__ == "__main__":
     unittest.main()

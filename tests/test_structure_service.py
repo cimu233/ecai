@@ -72,6 +72,25 @@ class StructureServiceTest(unittest.TestCase):
         self.assertIn("先提出问题", markdown)
         self.assertEqual("completed", self.lessons.get(self.lesson.id).status)
 
+    def test_catalog_declared_text_lesson_skips_structuring(self):
+        self.lessons.upsert(
+            self.course.id,
+            2,
+            "Announcement",
+            content_type="text",
+            media_hint="no_media",
+        )
+        provider = FakeStructurer()
+        service = StructureService(
+            self.courses, self.lessons, provider, show_progress=False
+        )
+
+        result = service.structure_course(self.course.id)
+
+        self.assertEqual(1, result.succeeded)
+        self.assertEqual(1, result.skipped)
+        self.assertEqual(1, provider.calls)
+
     def test_codex_runner_uses_read_only_ephemeral_mode(self):
         output = {
             "title": "Lesson",

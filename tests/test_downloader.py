@@ -153,12 +153,16 @@ mixed.m3u8
         )
         url = self.server.base_url + "/master.m3u8"
         source = auth_source(url, "hls")
+        stages = []
 
         result = AudioDownloader(ffmpeg=self.ffmpeg).download(
-            DownloadRequest(lesson=make_lesson(url), source=source, output_dir=self.output_dir)
+            DownloadRequest(lesson=make_lesson(url), source=source, output_dir=self.output_dir),
+            on_stage=stages.append,
         )
 
         self.assertGreater(result.size_bytes, 0)
+        self.assertEqual(["downloading", "transcoding", "verifying"], stages)
+        self.assertFalse((self.output_dir / "audio.downloaded.mka").exists())
         requested_paths = [path for path, _headers in self.server.requests]
         self.assertIn("/audio.m3u8", requested_paths)
         self.assertNotIn("/mixed.m3u8", requested_paths)

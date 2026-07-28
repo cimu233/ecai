@@ -100,4 +100,3 @@ class MediaSelector:
                 source.bandwidth if source.bandwidth is not None else 2**63,
             ),
         )
-

@@ -81,6 +81,22 @@ class DownloadService:
                         )
                     continue
 
+                if lesson.media_hint == "no_media":
+                    self.lessons.set_status(lesson.id, "no_media")
+                    items.append(
+                        DownloadItemResult(
+                            lesson_id=lesson.id,
+                            status="no_media",
+                        )
+                    )
+                    if self.downloader.show_progress:
+                        finish_progress(
+                            "  [{}/{}] 已跳过 ✓  {}（目录标记为无音视频）".format(
+                                idx, total, lesson.title[:40]
+                            )
+                        )
+                    continue
+
                 next_lesson = self._next_download_candidate(lessons, idx)
 
                 def start_prefetch() -> None:
@@ -118,7 +134,7 @@ class DownloadService:
             executor.shutdown(wait=True)
 
         succeeded = sum(item.status == "audio_ready" for item in items)
-        skipped = sum(item.status == "skipped" for item in items)
+        skipped = sum(item.status in {"skipped", "no_media"} for item in items)
         failed = len(items) - succeeded - skipped
         return DownloadBatchResult(
             course_id=course_id,
@@ -128,6 +144,59 @@ class DownloadService:
             failed=failed,
             items=items,
         )
+
+    def download_overview(
+        self,
+        course_id: str,
+        lesson_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        positions: Optional[set] = None,
+    ):
+        lessons = self.lessons.list_for_download(
+            course_id, lesson_id, limit, positions
+        )
+        rows = []
+        for lesson in lessons:
+            artifact = self._existing_artifact(lesson)
+            output_dir = self._lesson_output_dir(lesson)
+            partials = [
+                path
+                for pattern in ("audio.partial.*", "audio.download.partial.*")
+                for path in output_dir.glob(pattern)
+                if path.is_file() and path.stat().st_size > 0
+            ]
+            downloaded_media = output_dir / "audio.downloaded.mka"
+            if artifact is not None:
+                local_state = "complete"
+                size_bytes = int(artifact["size_bytes"] or 0)
+            elif downloaded_media.is_file() and downloaded_media.stat().st_size > 0:
+                local_state = "downloaded_pending_conversion"
+                size_bytes = downloaded_media.stat().st_size
+            elif partials:
+                local_state = "partial"
+                size_bytes = max(path.stat().st_size for path in partials)
+            elif lesson.media_hint == "no_media":
+                local_state = "no_media"
+                size_bytes = 0
+            elif self.source_cache.load(
+                self._source_cache_path(lesson), lesson
+            ) is not None:
+                local_state = "source_cached"
+                size_bytes = 0
+            else:
+                local_state = "pending"
+                size_bytes = 0
+            rows.append(
+                {
+                    "lesson_id": lesson.id,
+                    "position": lesson.position,
+                    "title": lesson.title,
+                    "content_type": lesson.content_type,
+                    "local_state": local_state,
+                    "size_bytes": size_bytes,
+                }
+            )
+        return rows
 
     def _download_lesson(
         self,
@@ -229,7 +298,7 @@ class DownloadService:
 
     def _next_download_candidate(self, lessons, current_index: int) -> Optional[Lesson]:
         for lesson in lessons[current_index:]:
-            if self._existing_artifact(lesson) is None:
+            if lesson.media_hint != "no_media" and self._existing_artifact(lesson) is None:
                 return lesson
         return None
 

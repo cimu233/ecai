@@ -40,6 +40,8 @@ class Lesson:
     last_error_at: Optional[str]
     created_at: str
     updated_at: str
+    content_type: Optional[str] = None
+    media_hint: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

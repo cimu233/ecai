@@ -218,10 +218,14 @@ Desktop menu item 1 runs `auth login` directly and never asks for a course URL.
 
 - Account discovery reads the authorized “我的课程” list and imports columns, large columns, camps, memberships, and course catalogs.
 - Course discovery listens to authorized page JSON responses and uses Xiaoe `resource_id` as the stable lesson key.
+- Catalog metadata classifies lessons as text, audio, video, live replay, or probe-required. Explicit text/no-replay items skip browser, ASR, and structuring waits immediately; unknown legacy types still use browser detection.
 - Collapsed catalog chapters are expanded in bounded batches, and the active browser tab and authenticated Gateway are reused across the course run.
 - Direct audio preserves original bytes and supports HTTP Range resume.
 - HLS prefers an independent audio rendition; mixed video streams are reduced to their first audio track.
-- Interrupted HLS output cannot safely resume from an incomplete m4a container, so only that current lesson restarts; completed lesson audio is retained and skipped.
+- HLS and video-file handling uses two explicit stages: network audio download to `audio.downloaded.mka`, then local remux/transcoding to m4a. A completed network stage is reused after interruption.
+- Download and conversion progress show percentages and estimated remaining time when duration or content length is available. Network progress also shows transferred size and current throughput; conversion progress shows ffmpeg's media-time speed.
+- Before a course download starts, the CLI prints every lesson's catalog type and local state: complete, downloaded/awaiting conversion, interrupted/partial, pending, cached source, or no media.
+- CLI tables calculate terminal display width for CJK text so Chinese and Latin columns remain aligned.
 - Standard AES-128 HLS is handled by ffmpeg. SAMPLE-AES and DRM are reported as unsupported.
 - Long audio is split locally into provider-sized, 16 kHz mono chunks. Baidu uses 55-second WAV chunks; the other current providers use four-minute MP3 chunks. The local Qwen worker loads the model once and transcribes all chunks through Apple MPS.
 - Raw provider responses, normalized transcripts, plain text, structured JSON, and Markdown notes are all retained.

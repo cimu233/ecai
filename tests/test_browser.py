@@ -36,6 +36,15 @@ class BrowserHelpersTest(unittest.TestCase):
             classify_xiaoe_page("https://example.com/course", "课程目录 关注我们", has_login_challenge=True),
         )
 
+    def test_course_description_with_scan_to_watch_is_not_a_login_page(self):
+        self.assertEqual(
+            "authenticated",
+            classify_xiaoe_page(
+                "https://example.com/p/course/video/v_123",
+                "视频若被吞，用下面飞书链接扫码观看即可",
+            ),
+        )
+
     def test_cookie_header_only_contains_matching_domains(self):
         cookies = [
             {"name": "session", "value": "one", "domain": ".xiaoe-tech.com"},
@@ -104,9 +113,12 @@ class BrowserHelpersTest(unittest.TestCase):
         self.assertIn("await cleanupOperationTabs()", scripts[0])
         self.assertIn("candidate.targetId !== tab.targetId", scripts[0])
         self.assertIn("const deadline = Date.now()", scripts[0])
-        self.assertIn("if (found || performanceFound)", scripts[0])
+        self.assertIn("if (found || apiFound || performanceFound)", scripts[0])
         self.assertIn("parsed.searchParams.values()", scripts[0])
         self.assertIn("await click([playback.clickPoint.x", scripts[0])
+        self.assertIn("audio\\.info\\.get", scripts[0])
+        self.assertIn("performance.clearResourceTimings()", scripts[0])
+        self.assertIn("if (currentUrl !== requestedUrl || true)", scripts[0])
 
     def test_catalog_capture_keeps_reusable_tab_and_cleans_spawned_tabs(self):
         scripts = []

@@ -79,9 +79,12 @@ class TranscriptionService:
         total = len(lessons)
         try:
             for index, lesson in enumerate(lessons, 1):
-                item = self._transcribe_lesson(
-                    lesson.id, force, index, total, lesson.title
-                )
+                if lesson.media_hint == "no_media":
+                    item = TranscriptionItemResult(lesson.id, "skipped")
+                else:
+                    item = self._transcribe_lesson(
+                        lesson.id, force, index, total, lesson.title
+                    )
                 items.append(item)
                 if self.show_progress:
                     label = {

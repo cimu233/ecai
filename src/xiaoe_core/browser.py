@@ -315,7 +315,6 @@ def classify_xiaoe_page(url: str, body_text: str, has_login_challenge: bool = Fa
         "登录/注册",
         "请先登录",
         "登录后观看",
-        "扫码观看",
         "微信扫一扫",
     )
     challenge_context = has_login_challenge and any(

@@ -34,13 +34,16 @@ class StructureService:
         items = []
         total = len(lessons)
         for index, lesson in enumerate(lessons, 1):
-            with ProgressSpinner(
-                "  [{}/{}] 结构化整理：{}".format(
-                    index, total, lesson.title[:40]
-                ),
-                enabled=None if self.show_progress else False,
-            ):
-                item = self._structure_lesson(lesson.id, lesson.title, force)
+            if lesson.media_hint == "no_media":
+                item = StructureItemResult(lesson.id, "skipped")
+            else:
+                with ProgressSpinner(
+                    "  [{}/{}] 结构化整理：{}".format(
+                        index, total, lesson.title[:40]
+                    ),
+                    enabled=None if self.show_progress else False,
+                ):
+                    item = self._structure_lesson(lesson.id, lesson.title, force)
             items.append(item)
             if self.show_progress:
                 label = {

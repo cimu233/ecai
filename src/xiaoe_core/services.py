@@ -80,6 +80,8 @@ def lesson_from_row(row: object) -> Lesson:
         last_error_at=row["last_error_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        content_type=row["content_type"],
+        media_hint=row["media_hint"],
     )
 
 
@@ -162,6 +164,8 @@ class LessonService:
         title: str,
         source_url: Optional[str] = None,
         lesson_id: Optional[str] = None,
+        content_type: Optional[str] = None,
+        media_hint: Optional[str] = None,
     ) -> Lesson:
         if position < 1:
             raise ValueError("Lesson position must be at least 1.")
@@ -189,10 +193,35 @@ class LessonService:
                 connection.execute(
                     """
                     UPDATE lessons
-                    SET position = ?, title = ?, source_url = COALESCE(?, source_url), updated_at = ?
+                    SET position = ?,
+                        title = ?,
+                        source_url = COALESCE(?, source_url),
+                        content_type = COALESCE(?, content_type),
+                        media_hint = COALESCE(?, media_hint),
+                        status = CASE
+                            WHEN ? = 'no_media' AND status IN (
+                                'pending_source', 'resolving_source', 'source_unavailable',
+                                'download_failed', 'no_media'
+                            ) THEN 'no_media'
+                            WHEN ? IS NOT NULL AND ? != 'no_media' AND status = 'no_media'
+                                THEN 'pending_source'
+                            ELSE status
+                        END,
+                        updated_at = ?
                     WHERE id = ?
                     """,
-                    (position, clean_title, source_url, timestamp, current.id),
+                    (
+                        position,
+                        clean_title,
+                        source_url,
+                        content_type,
+                        media_hint,
+                        media_hint,
+                        media_hint,
+                        media_hint,
+                        timestamp,
+                        current.id,
+                    ),
                 )
             loaded = self.get(current.id)
             if loaded is None:
@@ -204,10 +233,21 @@ class LessonService:
                 """
                 INSERT INTO lessons (
                     id, course_id, position, title, source_url, status,
-                    error, attempt_count, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'pending_source', NULL, 0, ?, ?)
+                    error, attempt_count, content_type, media_hint, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?)
                 """,
-                (resolved_id, course_id, position, clean_title, source_url, timestamp, timestamp),
+                (
+                    resolved_id,
+                    course_id,
+                    position,
+                    clean_title,
+                    source_url,
+                    "no_media" if media_hint == "no_media" else "pending_source",
+                    content_type,
+                    media_hint,
+                    timestamp,
+                    timestamp,
+                ),
             )
         loaded = self.get(resolved_id)
         if loaded is None:

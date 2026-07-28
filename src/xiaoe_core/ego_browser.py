@@ -369,7 +369,11 @@ cliLog({marker} + JSON.stringify(captureResult))
         return {"state": state, "rows": value.get("rows", [])}
 
     def capture_media(self, url: str, expression: str, wait_seconds: float) -> Dict[str, Any]:
-        script = self._operation_prefix(url, bootstrap_gateway=not self.gateway_ready) + """
+        script = self._operation_prefix(
+            url,
+            bootstrap_gateway=not self.gateway_ready,
+            force_reload=True,
+        ) + """
 let captureResult
 try {{
 const state = await js(String.raw`({{
@@ -403,11 +407,17 @@ while (Date.now() < deadline) {{
     const mime = (response.mimeType || '').toLowerCase()
     return mediaPattern.test(url) || mime.includes('mpegurl') || mime.startsWith('audio/')
   }})
+  const apiFound = events.some(event =>
+    event.method === 'Network.responseReceived' &&
+    /getPlayUrl|detail_info|get_play_info|audio\.info\.get/i.test(
+      event.params && event.params.response && event.params.response.url || ''
+    )
+  )
   const performanceFound = await js(String.raw`performance.getEntriesByType('resource').some(entry =>
     /playlist_eof\\.m3u8|params(?:%5B|\\[)play_url/i.test(entry.name || '')
   )`)
-  if (found || performanceFound) {{
-    await wait(0.15)
+  if (found || apiFound || performanceFound) {{
+    await wait(0.3)
     events.push(...await drainEvents())
     break
   }}
@@ -442,7 +452,7 @@ for (const entry of performanceEntries) {{
 }}
 const playInfoResponses = events.filter(event =>
   event.method === 'Network.responseReceived' &&
-  /getPlayUrl|detail_info|get_play_info/i.test(
+  /getPlayUrl|detail_info|get_play_info|audio\.info\.get/i.test(
     event.params && event.params.response && event.params.response.url || ''
   )
 )
@@ -533,7 +543,12 @@ cliLog({marker} + JSON.stringify(result))
     def invalidate_gateway(self) -> None:
         self.gateway_ready = False
 
-    def _operation_prefix(self, url: str, bootstrap_gateway: bool = True) -> str:
+    def _operation_prefix(
+        self,
+        url: str,
+        bootstrap_gateway: bool = True,
+        force_reload: bool = False,
+    ) -> str:
         gateway_expression = """
 (async () => {
   const requestedUrl = __REQUESTED_URL__
@@ -617,6 +632,7 @@ cliLog({marker} + JSON.stringify(result))
                 "}",
                 "await cdp('Page.enable')",
                 "await cdp('Network.enable')",
+                "await js(String.raw`performance.clearResourceTimings()`)",
                 "await drainEvents()",
         ]
         if bootstrap_gateway:
@@ -635,8 +651,11 @@ cliLog({marker} + JSON.stringify(result))
             ])
         lines.extend([
                 "const currentUrl = await js(String.raw`location.href`)",
-                "if (currentUrl !== requestedUrl) {",
-                "  await gotoUrl(requestedUrl)",
+                "if (currentUrl !== requestedUrl || {}) {{".format(
+                    str(force_reload).lower()
+                ),
+                "  if (currentUrl === requestedUrl) await cdp('Page.reload')",
+                "  else await gotoUrl(requestedUrl)",
                 "  const navigationDeadline = Date.now() + 4000",
                 "  while (Date.now() < navigationDeadline) {",
                 "    const ready = await js(String.raw`location.href === " + json.dumps(url) + " &&",

@@ -192,6 +192,74 @@ class DownloadServiceTest(unittest.TestCase):
         self.assertEqual(2, result.succeeded)
         self.assertTrue(second_resolved.is_set())
 
+    def test_catalog_declared_text_lesson_skips_without_browser_resolution(self) -> None:
+        text_lesson = self.lessons.upsert(
+            course_id=self.course.id,
+            position=2,
+            title="Announcement",
+            source_url="https://school.example.com/p/course/text/i_1",
+            content_type="text",
+            media_hint="no_media",
+        )
+        resolver = mock.Mock()
+        service = DownloadService(
+            paths=self.paths,
+            courses=self.courses,
+            lessons=self.lessons,
+            resolver=resolver,
+            selector=MediaSelector(),
+            downloader=AudioDownloader(
+                ffmpeg=ffmpeg_executable(), show_progress=False
+            ),
+        )
+
+        result = service.download_course(
+            self.course.id, lesson_id=text_lesson.id
+        )
+
+        self.assertEqual(1, result.skipped)
+        self.assertEqual(0, result.failed)
+        self.assertEqual("no_media", result.items[0].status)
+        resolver.resolve.assert_not_called()
+
+    def test_download_overview_detects_complete_partial_and_no_media(self) -> None:
+        completed = self.service.download_course(self.course.id)
+        self.assertEqual(1, completed.succeeded)
+        partial_lesson = self.lessons.upsert(
+            self.course.id,
+            2,
+            "Interrupted",
+            content_type="live_replay",
+            media_hint="has_media",
+        )
+        partial_dir = self.service._lesson_output_dir(partial_lesson)
+        partial_dir.mkdir(parents=True)
+        (partial_dir / "audio.partial.m4a").write_bytes(b"x" * 1024)
+        downloaded_lesson = self.lessons.upsert(
+            self.course.id,
+            3,
+            "Downloaded",
+            content_type="video",
+            media_hint="has_media",
+        )
+        downloaded_dir = self.service._lesson_output_dir(downloaded_lesson)
+        downloaded_dir.mkdir(parents=True)
+        (downloaded_dir / "audio.downloaded.mka").write_bytes(b"x" * 2048)
+        self.lessons.upsert(
+            self.course.id,
+            4,
+            "Announcement",
+            content_type="text",
+            media_hint="no_media",
+        )
+
+        overview = self.service.download_overview(self.course.id)
+
+        self.assertEqual(
+            ["complete", "partial", "downloaded_pending_conversion", "no_media"],
+            [row["local_state"] for row in overview],
+        )
+
     def test_legacy_browser_failures_are_recovered_before_retry(self) -> None:
         self.lessons.set_failure(
             self.lesson.id,

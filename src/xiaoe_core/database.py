@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class Database:
@@ -43,6 +43,8 @@ class Database:
                     attempt_count INTEGER NOT NULL DEFAULT 0,
                     last_error_code TEXT,
                     last_error_at TEXT,
+                    content_type TEXT,
+                    media_hint TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(course_id, position)
@@ -100,6 +102,8 @@ class Database:
             self._add_column(connection, "lessons", "attempt_count", "INTEGER NOT NULL DEFAULT 0")
             self._add_column(connection, "lessons", "last_error_code", "TEXT")
             self._add_column(connection, "lessons", "last_error_at", "TEXT")
+            self._add_column(connection, "lessons", "content_type", "TEXT")
+            self._add_column(connection, "lessons", "media_hint", "TEXT")
             self._add_column(connection, "artifacts", "size_bytes", "INTEGER")
             self._add_column(connection, "artifacts", "duration_seconds", "REAL")
             self._add_column(connection, "artifacts", "container", "TEXT")

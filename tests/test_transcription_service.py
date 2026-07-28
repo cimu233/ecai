@@ -89,6 +89,30 @@ class TranscriptionServiceTest(unittest.TestCase):
 
         self.assertEqual([output_dir / "chunk_0000.mp3"], chunks)
 
+    def test_catalog_declared_text_lesson_skips_asr(self):
+        self.lessons.upsert(
+            self.course.id,
+            2,
+            "Announcement",
+            content_type="text",
+            media_hint="no_media",
+        )
+        provider = FakeProvider()
+        service = TranscriptionService(
+            self.paths,
+            self.courses,
+            self.lessons,
+            provider,
+            AudioChunker(chunk_seconds=240),
+            show_progress=False,
+        )
+
+        result = service.transcribe_course(self.course.id)
+
+        self.assertEqual(1, result.succeeded)
+        self.assertEqual(1, result.skipped)
+        self.assertEqual(1, len(provider.calls))
+
 
 if __name__ == "__main__":
     unittest.main()

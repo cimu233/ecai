@@ -51,6 +51,7 @@ XiaoeBrowserMediaResolver = None  # type: ignore[assignment]
 XiaoeCatalogService = None  # type: ignore[assignment]
 course_status_label = None  # type: ignore[assignment]
 display_lessons = None  # type: ignore[assignment]
+display_download_overview = None  # type: ignore[assignment]
 lesson_status_label = None  # type: ignore[assignment]
 pick_lesson_positions = None  # type: ignore[assignment]
 
@@ -112,6 +113,11 @@ def _lazy_imports() -> None:
     _import_if_none("XiaoeCatalogService", "xiaoe_core.xiaoe", "XiaoeCatalogService")
     _import_if_none("course_status_label", "xiaoe_cli.course_picker", "course_status_label")
     _import_if_none("display_lessons", "xiaoe_cli.course_picker", "display_lessons")
+    _import_if_none(
+        "display_download_overview",
+        "xiaoe_cli.course_picker",
+        "display_download_overview",
+    )
     _import_if_none("lesson_status_label", "xiaoe_cli.course_picker", "lesson_status_label")
     _import_if_none("pick_lesson_positions", "xiaoe_cli.course_picker", "pick_lesson_positions")
 
@@ -883,11 +889,6 @@ def run(arguments: argparse.Namespace) -> int:
 
         lessons = LessonService(service.database)
 
-        # Always show lesson list in human-readable mode so users know what's available.
-        if not arguments.as_json:
-            all_lessons = lessons.list_for_download(arguments.course_id)
-            display_lessons([lesson.to_dict() for lesson in all_lessons], sys.stdout)
-
         download_service = DownloadService(
             paths=paths,
             courses=service,
@@ -896,6 +897,16 @@ def run(arguments: argparse.Namespace) -> int:
             selector=MediaSelector(),
             downloader=AudioDownloader(),
         )
+        if not arguments.as_json:
+            display_download_overview(
+                download_service.download_overview(
+                    arguments.course_id,
+                    lesson_id=arguments.lesson_id,
+                    limit=arguments.limit,
+                    positions=position_set,
+                ),
+                sys.stdout,
+            )
         result = download_service.download_course(
             arguments.course_id,
             lesson_id=arguments.lesson_id,
@@ -916,7 +927,7 @@ def run(arguments: argparse.Namespace) -> int:
                 )
             )
             for item in result.items:
-                label = {"audio_ready": "已下载", "skipped": "已跳过", "source_unavailable": "无音频源", "download_failed": "下载失败"}.get(
+                label = {"audio_ready": "已下载", "skipped": "已跳过", "no_media": "图文/无媒体，已跳过", "source_unavailable": "无音频源", "download_failed": "下载失败"}.get(
                     item.status, item.status
                 )
                 print("  {} — {}".format(item.lesson_id, label))
@@ -1043,6 +1054,15 @@ def run(arguments: argparse.Namespace) -> int:
 
         def execute_pipeline() -> Any:
             catalog.refresh(arguments.course_id)
+            if not arguments.as_json:
+                display_download_overview(
+                    downloads.download_overview(
+                        arguments.course_id,
+                        lesson_id=arguments.lesson_id,
+                        limit=arguments.limit,
+                    ),
+                    sys.stdout,
+                )
             return PipelineRunner(downloads, transcriptions, structures).run(
                 arguments.course_id,
                 lesson_id=arguments.lesson_id,

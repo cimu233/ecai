@@ -13,6 +13,7 @@ from xiaoe_core.xiaoe import (
     XiaoeAccountCatalogService,
     XiaoeBrowserMediaResolver,
     XiaoeCatalogService,
+    classify_catalog_media,
     find_account_course_items,
     find_catalog_items,
 )
@@ -50,6 +51,23 @@ class XiaoeParsingTest(unittest.TestCase):
         ]
         urls = XiaoeBrowserMediaResolver._media_urls(events)
         self.assertEqual(["https://cdn/master.m3u8?token=x", "https://cdn/audio.m4a"], urls)
+
+    def test_media_urls_keep_latest_signature_for_same_media_path(self):
+        events = [
+            {"method": "Network.responseReceived", "params": {"response": {
+                "url": "https://cdn/audio.mp3?sign=old",
+                "mimeType": "audio/mpeg",
+            }}},
+            {"method": "Network.responseReceived", "params": {"response": {
+                "url": "https://cdn/audio.mp3?sign=fresh",
+                "mimeType": "audio/mpeg",
+            }}},
+        ]
+
+        self.assertEqual(
+            ["https://cdn/audio.mp3?sign=fresh"],
+            XiaoeBrowserMediaResolver._media_urls(events),
+        )
 
     def test_catalog_expansion_supports_xiaoe_collapsed_chapters(self):
         expression = XiaoeCatalogService._expand_expression()
@@ -117,6 +135,36 @@ class XiaoeParsingTest(unittest.TestCase):
     def test_catalog_position_prefers_global_sort_value(self):
         item = {"sort_value": "49", "sort_c": "1"}
         self.assertEqual(49, XiaoeCatalogService._position(item, 999))
+
+    def test_catalog_media_type_uses_explicit_resource_metadata(self):
+        self.assertEqual(
+            ("text", "no_media"),
+            classify_catalog_media(
+                {"resource_type": 1, "jump_url": "/p/course/text/i_1"}
+            ),
+        )
+        self.assertEqual(
+            ("audio", "has_media"),
+            classify_catalog_media(
+                {"resource_type": 2, "audio_length": 120}
+            ),
+        )
+        self.assertEqual(
+            ("video", "has_media"),
+            classify_catalog_media(
+                {"resource_type": 3, "video_length": 3600}
+            ),
+        )
+        self.assertEqual(
+            ("live_replay", "has_media"),
+            classify_catalog_media(
+                {"resource_type": 4, "is_lookback": 1, "alive_status": 3}
+            ),
+        )
+        self.assertEqual(
+            ("live", "probe"),
+            classify_catalog_media({"resource_type": 4}),
+        )
 
     def test_account_course_items_exclude_individual_live_resources(self):
         rows = [
