@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest import mock
 
 from xiaoe_core.browser import ChromeManager, EdgeManager, classify_xiaoe_page, cookie_header
-from xiaoe_core.ego_browser import EGO_MARKER, EgoCli
+from xiaoe_core.ego_browser import EGO_MARKER, EgoBrowserManager, EgoCli
 
 
 class BrowserHelpersTest(unittest.TestCase):
@@ -18,10 +18,22 @@ class BrowserHelpersTest(unittest.TestCase):
     def test_authorized_course_page_is_accepted(self):
         self.assertEqual("authenticated", classify_xiaoe_page("https://study.xiaoe-tech.com/course", "课程目录"))
 
-    def test_visible_qrcode_on_course_page_requires_login(self):
+    def test_deleted_lesson_is_access_denied(self):
+        self.assertEqual(
+            "access_denied",
+            classify_xiaoe_page("https://example.com/course", "您所查看的内容已删除"),
+        )
+
+    def test_visible_qrcode_with_login_context_requires_login(self):
         self.assertEqual(
             "login_required",
-            classify_xiaoe_page("https://example.com/course", "课程介绍", has_login_challenge=True),
+            classify_xiaoe_page("https://example.com/course", "请使用微信完成验证", has_login_challenge=True),
+        )
+
+    def test_share_qrcode_on_authenticated_course_is_ignored(self):
+        self.assertEqual(
+            "authenticated",
+            classify_xiaoe_page("https://example.com/course", "课程目录 关注我们", has_login_challenge=True),
         )
 
     def test_cookie_header_only_contains_matching_domains(self):
@@ -47,6 +59,15 @@ class BrowserHelpersTest(unittest.TestCase):
     def test_ego_output_parser_reads_stderr_marker(self):
         output = "warning\n{}{}\n".format(EGO_MARKER, '{"status":"ok"}')
         self.assertEqual({"status": "ok"}, EgoCli._extract_value(output))
+
+    def test_ego_course_operations_bootstrap_the_official_gateway(self):
+        manager = EgoBrowserManager(cli=mock.Mock())
+        prefix = manager._operation_prefix(
+            "https://app123.h5.xiaoeknow.com/p/course/ecourse/course_123"
+        )
+        self.assertIn("my_attend_normal_list.get", prefix)
+        self.assertIn("get_new_gateway", prefix)
+        self.assertIn("course_123", prefix)
 
     def test_ego_running_process_is_reused(self):
         process_runner = mock.Mock(return_value=mock.Mock(returncode=0))

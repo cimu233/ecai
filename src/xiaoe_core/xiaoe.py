@@ -53,7 +53,7 @@ def find_account_course_items(rows: Any) -> List[Dict[str, Any]]:
         except (TypeError, ValueError):
             continue
         resource_id = str(row.get("resources_id") or row.get("resource_id") or "")
-        jump_url = str(row.get("jump_url") or row.get("jumpUrl") or "")
+        jump_url = str(row.get("jump_url") or row.get("jumpUrl") or row.get("h5_url") or "")
         details = row.get("detail_resources")
         if (
             resource_type in ACCOUNT_COURSE_TYPES
@@ -312,8 +312,9 @@ class XiaoeAccountCatalogService:
 
     def scan(self, source_url: Optional[str] = None) -> Dict[str, Any]:
         origins = self._origins(source_url)
+        capture_origins = origins[:1] if getattr(self.browser, "global_account_catalog", False) else origins
         raw_rows: List[Dict[str, Any]] = []
-        for origin in origins:
+        for origin in capture_origins:
             captured = self._capture_origin(origin)
             state = captured["state"]
             if state["status"] == "login_required":
@@ -333,7 +334,10 @@ class XiaoeAccountCatalogService:
         for item in candidates:
             resource_id = str(item.get("resources_id") or item.get("resource_id"))
             origin = str(item["_store_origin"])
-            source = urljoin(origin + "/", str(item.get("jump_url") or item.get("jumpUrl")))
+            source = urljoin(
+                origin + "/",
+                str(item.get("jump_url") or item.get("jumpUrl") or item.get("h5_url")),
+            )
             details = item.get("detail_resources")
             details = details if isinstance(details, dict) else {}
             title = str(

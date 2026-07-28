@@ -69,9 +69,15 @@ class XiaoeParsingTest(unittest.TestCase):
                 "jumpUrl": "/course/1",
                 "resource_title": "Course",
             },
+            {
+                "resource_type": 50,
+                "resource_id": "course_2",
+                "h5_url": "https://store.example.com/course/2",
+                "title": "Central account course",
+            },
         ]
         items = find_account_course_items(rows)
-        self.assertEqual(["column_1", "course_1"], [
+        self.assertEqual(["column_1", "course_1", "course_2"], [
             item.get("resources_id") or item.get("resource_id") for item in items
         ])
 

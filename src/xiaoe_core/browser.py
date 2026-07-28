@@ -316,9 +316,12 @@ def classify_xiaoe_page(url: str, body_text: str, has_login_challenge: bool = Fa
         "扫码观看",
         "微信扫一扫",
     )
-    if has_login_challenge or any(marker in compact for marker in login_markers):
+    challenge_context = has_login_challenge and any(
+        marker in compact for marker in ("登录", "注册", "扫码", "微信")
+    )
+    if challenge_context or any(marker in compact for marker in login_markers):
         return "login_required"
-    if any(marker in compact for marker in ("无权访问", "暂无权限", "课程已下架")):
+    if any(marker in compact for marker in ("无权访问", "暂无权限", "课程已下架", "内容已删除")):
         return "access_denied"
     return "authenticated"
 

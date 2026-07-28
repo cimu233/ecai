@@ -203,6 +203,7 @@ class EgoBrowserManager:
     """Manage an isolated Ego Task Space that inherits the user's Ego login state."""
 
     browser_name = "ego"
+    global_account_catalog = True
 
     def __init__(self, cli: Optional[EgoCli] = None, task_name: str = EGO_TASK_NAME) -> None:
         self.cli = cli or EgoCli()
@@ -297,7 +298,7 @@ cliLog({marker} + JSON.stringify({{state, payloads}}))
         return {"state": state, "payloads": value.get("payloads", [])}
 
     def capture_account_courses(self, origin: str) -> Dict[str, Any]:
-        url = origin.rstrip("/") + "/p/t/v1/study/study_h5/my_course"
+        url = "https://study.xiaoe-tech.com/t_l/learnIndex#/muti_index"
         script = self._operation_prefix(url) + """
 const state = await js(String.raw`({{
   url: location.href,
@@ -309,24 +310,26 @@ const state = await js(String.raw`({{
 }})`)
 const rows = await js(String.raw`(async () => {{
   const collected = []
-  let pageId = 0
   for (let page = 1; page <= 100; page += 1) {{
-    const body = new URLSearchParams()
-    body.set('bizData[limit]', '50')
-    body.set('bizData[page]', String(page))
-    body.set('bizData[page_id]', String(pageId))
-    const response = await fetch('/subscribe/resource_list', {{
+    const response = await fetch('/xe.learn-pc/my_attend_normal_list.get/1.0.1', {{
       method: 'POST',
       credentials: 'include',
-      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-      body: body.toString()
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{
+        page_size: 16,
+        page,
+        agent_type: 7,
+        resource_type: ['0']
+      }})
     }})
     const payload = await response.json()
+    if (!payload || payload.code !== 0) {{
+      throw new Error(payload && payload.msg || 'Xiaoe account catalog request failed')
+    }}
     const data = payload && payload.data || {{}}
     const items = Array.isArray(data.list) ? data.list : []
     collected.push(...items)
-    if (data.is_last || items.length === 0) break
-    pageId = data.page_id || 0
+    if (data.is_end || items.length === 0) break
   }}
   return collected
 }})()`)
@@ -462,12 +465,84 @@ cliLog({marker} + JSON.stringify(result))
             pass
 
     def _operation_prefix(self, url: str) -> str:
-        return """
-const task = await useOrCreateTaskSpace({task_name})
-await openOrReuseTab('about:blank', {{wait: true, timeout: 20}})
-await cdp('Page.enable')
-await cdp('Network.enable')
-await drainEvents()
-await gotoAndWait({url}, {{timeout: 30, settle: 1}})
-const tab = await currentTab()
-""".format(task_name=json.dumps(self.task_name), url=json.dumps(url))
+        gateway_expression = """
+(async () => {
+  const requestedUrl = __REQUESTED_URL__
+  const resourceMatch = requestedUrl.match(/(?:course|p|l|a|v|i)_[A-Za-z0-9]+/)
+  const appMatch = requestedUrl.match(/https:\\/\\/(app[A-Za-z0-9]+)\\./)
+  const requestedResourceId = resourceMatch && resourceMatch[0]
+  const requestedAppId = appMatch && appMatch[1]
+  const rows = []
+  for (let page = 1; page <= 100; page += 1) {
+    const response = await fetch('/xe.learn-pc/my_attend_normal_list.get/1.0.1', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        page_size: 16,
+        page,
+        agent_type: 7,
+        resource_type: ['0']
+      })
+    })
+    const payload = await response.json()
+    if (!payload || payload.code !== 0) {
+      throw new Error(payload && payload.msg || 'Xiaoe account catalog request failed')
+    }
+    const data = payload.data || {}
+    const items = Array.isArray(data.list) ? data.list : []
+    rows.push(...items)
+    if (data.is_end || items.length === 0) break
+  }
+  const exact = rows.find(row =>
+    String(row.resources_id || row.resource_id || '') === requestedResourceId
+  )
+  const sameStore = rows.find(row =>
+    row.app_id === requestedAppId && [5, 6, 8, 25, 50].includes(Number(row.resource_type))
+  )
+  const item = exact || sameStore
+  if (!item) return null
+  const response = await fetch('/xe.learn-pc/get_new_gateway/1.0.0', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      type: 2,
+      app_id: item.app_id,
+      user_id: item.user_id,
+      resource_type: item.resource_type,
+      resource_id: item.resources_id || item.resource_id,
+      content_app_id: item.content_app_id || ''
+    })
+  })
+  const payload = await response.json()
+  if (!payload || payload.code !== 0) {
+    throw new Error(payload && payload.msg || 'Xiaoe course gateway request failed')
+  }
+  return payload.data || null
+})()
+""".replace("__REQUESTED_URL__", json.dumps(url))
+        return "\n".join(
+            [
+                "const task = await useOrCreateTaskSpace({})".format(json.dumps(self.task_name)),
+                "const requestedUrl = {}".format(json.dumps(url)),
+                "await openOrReuseTab('about:blank', {wait: true, timeout: 20})",
+                "await cdp('Page.enable')",
+                "await cdp('Network.enable')",
+                "await drainEvents()",
+                "const requestedHost = new URL(requestedUrl).hostname",
+                "if (/\\.h5\\.(?:xet\\.pomoho|xiaoeknow)\\.com$/.test(requestedHost)) {",
+                "  await gotoAndWait({}, {{timeout: 30, settle: 1}})".format(
+                    json.dumps("https://study.xiaoe-tech.com/t_l/learnIndex#/muti_index")
+                ),
+                "  const gateway = await js({})".format(json.dumps(gateway_expression)),
+                "  if (gateway && gateway.url) {",
+                "    await gotoAndWait(gateway.url, {timeout: 30, settle: 1})",
+                "    await wait(1)",
+                "  }",
+                "}",
+                "await gotoAndWait(requestedUrl, {timeout: 30, settle: 1})",
+                "const tab = await currentTab()",
+                "",
+            ]
+        )
