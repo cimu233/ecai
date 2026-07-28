@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from .media import DIRECT_AUDIO_SUFFIXES, DownloadError, DownloadRequest, DownloadResult, MediaSource
+from .progress import clear_progress, finish_progress, update_progress
 
 
 StageCallback = Optional[Callable[[str], None]]
@@ -80,6 +81,7 @@ class AudioDownloader:
         self.show_progress = show_progress
         self._progress_index = 0
         self._progress_total = 0
+        self._progress_label = ""
 
     def set_progress_context(self, index: int, total: int) -> None:
         """Set the current file index and total for progress display."""
@@ -88,16 +90,14 @@ class AudioDownloader:
 
     def download(self, request: DownloadRequest, on_stage: StageCallback = None) -> DownloadResult:
         request.output_dir.mkdir(parents=True, exist_ok=True)
+        self._progress_label = request.lesson.title[:24]
 
         if self.show_progress and self._progress_total > 0:
             label = request.lesson.title[:48]
-            print(
-                "\r  [{}/{}] 正在下载：{}...".format(
+            update_progress(
+                "  [{}/{}] 正在下载：{}...".format(
                     self._progress_index, self._progress_total, label
-                ),
-                end="",
-                file=sys.stderr,
-                flush=True,
+                )
             )
 
         if request.source.kind == "direct_audio":
@@ -125,12 +125,10 @@ class AudioDownloader:
 
         if self.show_progress and self._progress_total > 0:
             size_mb = final_path.stat().st_size / (1024 * 1024)
-            print(
-                "\r  [{}/{}] 下载完成 ✓  {}  ({:.1f} MB)".format(
+            finish_progress(
+                "  [{}/{}] 下载完成 ✓  {}  ({:.1f} MB)".format(
                     self._progress_index, self._progress_total, request.lesson.title[:40], size_mb
-                ),
-                file=sys.stderr,
-                flush=True,
+                )
             )
 
         return DownloadResult(
@@ -266,19 +264,24 @@ class AudioDownloader:
             if process.stderr is not None:
                 for line in process.stderr:
                     collected.append(line)
-                    if self.show_progress:
+                    if self.show_progress and self._progress_total > 0:
                         match = progress_re.search(line)
                         if match:
                             h, m, s = int(match.group(1)), int(match.group(2)), float(match.group(3))
                             speed_match = speed_re.search(line)
                             speed = speed_match.group(1) if speed_match else "?"
-                            print(
-                                "\r  ffmpeg 转码中...  已处理: {:02d}:{:02d}:{:04.1f}  速度: {}x".format(
-                                    h, m, s, speed
-                                ),
-                                end="",
-                                file=sys.stderr,
-                                flush=True,
+                            action = "音频下载/封装中" if "copy" in command else "音频转码中"
+                            update_progress(
+                                "  [{}/{}] {}：{}  已处理: {:02d}:{:02d}:{:04.1f}  速度: {}x".format(
+                                    self._progress_index,
+                                    self._progress_total,
+                                    action,
+                                    self._progress_label,
+                                    h,
+                                    m,
+                                    s,
+                                    speed,
+                                )
                             )
             process.wait(timeout=10800)
         except subprocess.TimeoutExpired:
@@ -292,7 +295,7 @@ class AudioDownloader:
                 if process.stdout is not None:
                     process.stdout.close()
             if self.show_progress:
-                print("\r" + " " * 60 + "\r", end="", file=sys.stderr, flush=True)
+                clear_progress()
 
         stderr_tail = "".join(collected[-20:] if len(collected) > 20 else collected)
         return process.returncode == 0, stderr_tail
@@ -450,13 +453,10 @@ class AudioDownloader:
             current_mb = downloaded / (1024**3)
             total_mb = total / (1024**3)
             unit = "GB"
-        print(
-            "\r  {} {:5.1f}%  {:.1f}/{:.1f} {}".format(
+        update_progress(
+            "  {} {:5.1f}%  {:.1f}/{:.1f} {}".format(
                 bar, pct * 100, current_mb, total_mb, unit,
-            ),
-            end="",
-            file=sys.stderr,
-            flush=True,
+            )
         )
 
     @staticmethod

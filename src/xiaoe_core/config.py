@@ -53,6 +53,10 @@ class AppSettings:
         value = self.load().get("asr")
         return value if isinstance(value, dict) else {"provider": "local"}
 
+    def structure(self) -> dict:
+        value = self.load().get("structure")
+        return value if isinstance(value, dict) else {"provider": "codex"}
+
     VALID_BROWSERS = {"chrome", "edge", "ego", "playwright-chrome", "playwright-edge"}
 
     def browser(self) -> str:
@@ -74,6 +78,37 @@ class AppSettings:
         if base_url:
             settings["base_url"] = base_url
         payload["asr"] = settings
+        self._save(payload)
+
+    def save_structure(
+        self,
+        provider: str,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
+        effort: Optional[str] = None,
+    ) -> None:
+        payload = self.load()
+        settings = {"provider": provider}
+        if model:
+            settings["model"] = model
+        if base_url:
+            settings["base_url"] = base_url
+        if effort:
+            settings["effort"] = effort
+        existing_prompt = self.structure().get("prompt_file")
+        if existing_prompt:
+            settings["prompt_file"] = existing_prompt
+        payload["structure"] = settings
+        self._save(payload)
+
+    def save_structure_prompt(self, prompt_file: Optional[str]) -> None:
+        payload = self.load()
+        settings = self.structure().copy()
+        if prompt_file:
+            settings["prompt_file"] = prompt_file
+        else:
+            settings.pop("prompt_file", None)
+        payload["structure"] = settings
         self._save(payload)
 
     def _save(self, payload: dict) -> None:

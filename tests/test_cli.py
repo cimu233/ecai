@@ -3,6 +3,7 @@ import io
 import json
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from xiaoe_cli.main import (
@@ -67,6 +68,53 @@ class CliTest(unittest.TestCase):
         exit_code, output, errors = self.invoke(["browser", "current", "--json"])
         self.assertEqual(0, exit_code, errors)
         self.assertEqual("ego", json.loads(output)["browser"])
+
+    def test_structurer_backend_can_be_saved_and_read(self) -> None:
+        exit_code, output, errors = self.invoke(
+            [
+                "structurer", "use", "claude-code",
+                "--model", "sonnet", "--effort", "medium", "--json",
+            ]
+        )
+        self.assertEqual(0, exit_code, errors)
+        self.assertEqual("claude-code", json.loads(output)["provider"])
+        exit_code, output, errors = self.invoke(["structurer", "current", "--json"])
+        self.assertEqual(0, exit_code, errors)
+        payload = json.loads(output)
+        self.assertEqual("claude-code", payload["provider"])
+        self.assertEqual("sonnet", payload["model"])
+        self.assertEqual("medium", payload["effort"])
+
+    def test_custom_structure_prompt_can_be_initialized_and_reset(self) -> None:
+        exit_code, output, errors = self.invoke(
+            ["structurer", "prompt", "init", "--json"]
+        )
+        self.assertEqual(0, exit_code, errors)
+        payload = json.loads(output)
+        self.assertEqual("custom", payload["mode"])
+        prompt_file = Path(payload["prompt_file"])
+        self.assertTrue(prompt_file.is_file())
+        self.assertIn("{{TRANSCRIPT}}", prompt_file.read_text(encoding="utf-8"))
+
+        exit_code, output, errors = self.invoke(
+            ["structurer", "prompt", "reset", "--json"]
+        )
+        self.assertEqual(0, exit_code, errors)
+        self.assertEqual("built_in", json.loads(output)["mode"])
+
+    def test_prompt_open_initializes_file_and_uses_default_application(self) -> None:
+        with mock.patch(
+            "xiaoe_core.file_opener.open_with_default_app"
+        ) as opener:
+            exit_code, output, errors = self.invoke(
+                ["structurer", "prompt", "open", "--json"]
+            )
+        self.assertEqual(0, exit_code, errors)
+        payload = json.loads(output)
+        self.assertTrue(payload["opened"])
+        prompt_file = Path(payload["prompt_file"])
+        self.assertTrue(prompt_file.is_file())
+        opener.assert_called_once_with(prompt_file)
 
     def test_text_browser_output_is_human_readable(self) -> None:
         exit_code, output, errors = self.invoke(["browser", "current"])

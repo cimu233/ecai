@@ -18,7 +18,7 @@
 2. 扫描课程目录结构
 3. 批量下载课程音频（m4a → mp3 转码）
 4. 语音转文字（支持阿里 DashScope / OpenAI Whisper / 本地 Qwen ASR 等多后端）
-5. 整理输出 Markdown 讲义
+5. 通过本机 Codex / Claude Code 或多家模型 API 整理输出 Markdown 讲义
 
 ---
 
@@ -33,11 +33,12 @@ xiaoe-audio-pipeline/
 │   │   ├── asr_registry.py  # ASR 提供商注册表
 │   │   ├── auth.py          # 浏览器自动登录（账号密码 + 滑块验证码）
 │   │   ├── browser.py       # Chrome/Edge CDP 后端（WebSocket）+ 平台自适应路径
-│   │   ├── config.py        # 配置文件管理（TOML），支持 5 种浏览器后端
+│   │   ├── config.py        # settings.json 配置管理，支持 5 种浏览器后端
 │   │   ├── database.py      # SQLite 数据库（课程/任务状态持久化）
 │   │   ├── download_service.py  # 下载任务编排
 │   │   ├── downloader.py    # 音频下载 + ffmpeg 转码
 │   │   ├── ego_browser.py   # Ego 浏览器后端（macOS 专用，Task Space 隔离）
+│   │   ├── file_opener.py   # 使用系统默认程序打开本地文件
 │   │   ├── local_asr_worker.py  # 本地 Qwen ASR 子进程 worker
 │   │   ├── media.py         # 音频处理工具
 │   │   ├── models.py        # Pydantic 数据模型
@@ -46,8 +47,10 @@ xiaoe-audio-pipeline/
 │   │   ├── secrets.py       # 跨平台凭据存储（Keychain / Windows Credential / .env）
 │   │   ├── services.py      # 业务逻辑层
 │   │   ├── slider_captcha.py    # OpenCV 滑块验证码自动识别
-│   │   ├── structure_service.py # 课程结构扫描
-│   │   ├── structurer.py    # Markdown 讲义生成
+│   │   ├── structure_service.py # 转写稿到讲义的任务编排
+│   │   ├── structure_catalog.py # 在线模型清单与本地缓存
+│   │   ├── structure_registry.py # 结构化生成提供商注册表
+│   │   ├── structurer.py    # 本机 Agent / API 讲义生成
 │   │   ├── transcription_service.py  # 转写服务
 │   │   └── xiaoe.py         # 小鹅通页面爬取
 │   └── xiaoe_cli/           # CLI 入口
@@ -58,8 +61,9 @@ xiaoe-audio-pipeline/
 │   ├── ecai-build.command  # 一键构建发布脚本（也在桌面小工具文件夹）
 │   ├── configure_xiaoe_login.py
 │   ├── configure_asr.py
+│   ├── configure_structure.py
 │   └── select_course.py
-├── tests/                   # 16 个测试文件，72 个测试用例全部通过
+├── tests/                   # 19 个测试文件，109 个测试用例全部通过
 ├── .github/workflows/
 │   └── build.yml            # GitHub Actions Windows 构建（有未推送的修复）
 ├── Xiaoe Audio Pipeline.command  # macOS 双击启动的 Shell 菜单
@@ -230,6 +234,9 @@ python3 -m pytest tests/ -v
 | 滑块验证码 | `src/xiaoe_core/slider_captcha.py` |
 | 登录流程 | `src/xiaoe_core/auth.py` |
 | 配置文件 | `src/xiaoe_core/config.py` |
+| 结构化 Provider | `src/xiaoe_core/structure_registry.py`, `structurer.py` |
+| 模型清单缓存 | `src/xiaoe_core/structure_catalog.py` |
+| 自定义结构化提示词 | `~/.xiaoe-audio-pipeline/structure-prompt.txt` |
 | Shell 启动菜单 | `Xiaoe Audio Pipeline.command` |
 | 构建脚本 | `scripts/ecai-build.command` |
 

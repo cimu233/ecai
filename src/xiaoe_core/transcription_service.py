@@ -9,6 +9,7 @@ from .asr import AsrError, AsrProvider, merge_chunk_results
 from .config import AppPaths
 from .downloader import ffmpeg_executable
 from .models import TranscriptionBatchResult, TranscriptionItemResult, TranscriptResult
+from .progress import finish_progress, update_progress
 from .services import CourseService, LessonService
 
 
@@ -49,11 +50,13 @@ class TranscriptionService:
         lessons: LessonService,
         provider: AsrProvider,
         chunker: Optional[AudioChunker] = None,
+        show_progress: bool = True,
     ) -> None:
         self.paths = paths
         self.courses = courses
         self.lessons = lessons
         self.provider = provider
+        self.show_progress = show_progress
         self.chunker = chunker or AudioChunker(
             chunk_seconds=int(getattr(provider, "chunk_seconds", 240)),
             output_format=str(getattr(provider, "chunk_format", "mp3")),
@@ -72,8 +75,26 @@ class TranscriptionService:
         lessons = self.lessons.list_for_download(course_id, lesson_id, limit, positions)
         if lesson_id and not lessons:
             raise ValueError("Lesson does not exist in course: {}".format(lesson_id))
+        items = []
+        total = len(lessons)
         try:
-            items = [self._transcribe_lesson(lesson.id, force) for lesson in lessons]
+            for index, lesson in enumerate(lessons, 1):
+                item = self._transcribe_lesson(
+                    lesson.id, force, index, total, lesson.title
+                )
+                items.append(item)
+                if self.show_progress:
+                    label = {
+                        "transcript_ready": "转写完成 ✓",
+                        "skipped": "已跳过 ✓",
+                        "audio_missing": "缺少音频 ✗",
+                        "transcription_failed": "转写失败 ✗",
+                    }.get(item.status, item.status)
+                    finish_progress(
+                        "  [{}/{}] {}  {}".format(
+                            index, total, label, lesson.title[:40]
+                        )
+                    )
         finally:
             close = getattr(self.provider, "close", None)
             if callable(close):
@@ -89,7 +110,14 @@ class TranscriptionService:
             items=items,
         )
 
-    def _transcribe_lesson(self, lesson_id: str, force: bool) -> TranscriptionItemResult:
+    def _transcribe_lesson(
+        self,
+        lesson_id: str,
+        force: bool,
+        progress_index: int = 0,
+        progress_total: int = 0,
+        title: str = "",
+    ) -> TranscriptionItemResult:
         existing = self.lessons.transcript(lesson_id)
         if not force and existing is not None and existing["status"] == "transcript_ready":
             raw_path = Path(existing["raw_file_path"])
@@ -104,7 +132,19 @@ class TranscriptionService:
         self.lessons.begin_transcription(lesson_id, self.provider.name, self.provider.model)
         try:
             chunks = self.chunker.split(Path(artifact["file_path"]), lesson_dir / "asr_chunks")
-            results = [self.provider.transcribe(chunk) for chunk in chunks]
+            results = []
+            for chunk_index, chunk in enumerate(chunks, 1):
+                if self.show_progress:
+                    update_progress(
+                        "  [{}/{}] 语音转文字：{}（分块 {}/{}）".format(
+                            progress_index,
+                            progress_total,
+                            title[:32],
+                            chunk_index,
+                            len(chunks),
+                        )
+                    )
+                results.append(self.provider.transcribe(chunk))
             offsets = [index * float(self.chunker.chunk_seconds) for index in range(len(chunks))]
             result = merge_chunk_results(results, offsets)
             raw_path = lesson_dir / "transcript.raw.json"

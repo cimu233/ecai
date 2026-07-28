@@ -119,9 +119,10 @@ while true; do
 —— 工具 ——
 14. 查看任务状态
 15. 配置语音转文字服务
-16. 检查本地 Qwen ASR
+16. 配置结构化生成服务
+17. 检查本地 Qwen ASR
 
-17. 退出
+18. 退出
 ========================================
 MENU
   printf "请选择："
@@ -287,6 +288,10 @@ MENU
       pause_screen
       ;;
     16)
+      "$python_bin" "$project_dir/scripts/configure_structure.py"
+      pause_screen
+      ;;
+    17)
       "$project_dir/.local-asr-venv/bin/python" - <<'PY'
 import torch
 from qwen_asr import Qwen3ASRModel
@@ -301,7 +306,7 @@ print("Qwen 运行时：", Qwen3ASRModel.__name__)
 PY
       pause_screen
       ;;
-    17)
+    18)
       exit 0
       ;;
     *)

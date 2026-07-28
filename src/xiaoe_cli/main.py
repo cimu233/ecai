@@ -40,7 +40,10 @@ PipelineRunner = None  # type: ignore[assignment]
 CourseService = None  # type: ignore[assignment]
 LessonService = None  # type: ignore[assignment]
 StructureService = None  # type: ignore[assignment]
-CodexCliStructurer = None  # type: ignore[assignment]
+StructureModelCatalog = None  # type: ignore[assignment]
+STRUCTURE_PROVIDER_SPECS = None  # type: ignore[assignment]
+create_structure_provider = None  # type: ignore[assignment]
+list_structure_provider_specs = None  # type: ignore[assignment]
 TranscriptionService = None  # type: ignore[assignment]
 HybridMediaResolver = None  # type: ignore[assignment]
 XiaoeAccountCatalogService = None  # type: ignore[assignment]
@@ -81,7 +84,27 @@ def _lazy_imports() -> None:
     _import_if_none("CourseService", "xiaoe_core.services", "CourseService")
     _import_if_none("LessonService", "xiaoe_core.services", "LessonService")
     _import_if_none("StructureService", "xiaoe_core.structure_service", "StructureService")
-    _import_if_none("CodexCliStructurer", "xiaoe_core.structurer", "CodexCliStructurer")
+    _import_if_none(
+        "StructureModelCatalog",
+        "xiaoe_core.structure_catalog",
+        "StructureModelCatalog",
+    )
+    _import_if_none(
+        "STRUCTURE_PROVIDER_SPECS",
+        "xiaoe_core.structure_registry",
+        "STRUCTURE_PROVIDER_SPECS",
+    )
+    _import_if_none(
+        "create_structure_provider",
+        "xiaoe_core.structure_registry",
+        "build_structure_provider",
+        alias="create_structure_provider",
+    )
+    _import_if_none(
+        "list_structure_provider_specs",
+        "xiaoe_core.structure_registry",
+        "list_structure_provider_specs",
+    )
     _import_if_none("TranscriptionService", "xiaoe_core.transcription_service", "TranscriptionService")
     _import_if_none("HybridMediaResolver", "xiaoe_core.xiaoe", "HybridMediaResolver")
     _import_if_none("XiaoeAccountCatalogService", "xiaoe_core.xiaoe", "XiaoeAccountCatalogService")
@@ -106,6 +129,10 @@ def _import_if_none(module_attr: str, module_path: str, import_name: str, alias:
 def _safe_provider_choices():
     """Return ASR provider choices without crashing if deps are missing."""
     return ["local", "alibaba", "openai", "groq", "deepgram", "volcengine", "tencent", "baidu", "custom"]
+
+
+def _safe_structure_provider_choices():
+    return ["codex", "claude-code", "openai", "anthropic", "deepseek", "alibaba", "custom"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -178,7 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
     structure_parser.add_argument("course_id")
     structure_parser.add_argument("--lesson", dest="lesson_id")
     structure_parser.add_argument("--limit", type=int)
+    structure_parser.add_argument("--provider", choices=_safe_structure_provider_choices())
     structure_parser.add_argument("--model")
+    structure_parser.add_argument("--effort")
     structure_parser.add_argument("--force", action="store_true")
     structure_parser.add_argument("--json", action="store_true", dest="as_json")
 
@@ -192,7 +221,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--local-model-dir")
     run_parser.add_argument("--local-runtime-python")
     run_parser.add_argument("--local-device", choices=["auto", "mps", "cpu"], default="auto")
-    run_parser.add_argument("--codex-model")
+    run_parser.add_argument("--structure-provider", choices=_safe_structure_provider_choices())
+    run_parser.add_argument("--structure-model")
+    run_parser.add_argument("--structure-effort")
+    run_parser.add_argument("--codex-model", help=argparse.SUPPRESS)
     run_parser.add_argument("--force-transcription", action="store_true")
     run_parser.add_argument("--force-structure", action="store_true")
     run_parser.add_argument("--json", action="store_true", dest="as_json")
@@ -235,6 +267,45 @@ def build_parser() -> argparse.ArgumentParser:
     asr_use.add_argument("--model")
     asr_use.add_argument("--base-url")
     asr_use.add_argument("--json", action="store_true", dest="as_json")
+
+    structurer_parser = subcommands.add_parser(
+        "structurer", help="Inspect or select transcript structuring providers"
+    )
+    structurer_commands = structurer_parser.add_subparsers(
+        dest="structurer_command", required=True
+    )
+    structurer_providers = structurer_commands.add_parser(
+        "providers", help="List supported structuring providers"
+    )
+    structurer_providers.add_argument("--json", action="store_true", dest="as_json")
+    structurer_models = structurer_commands.add_parser(
+        "models", help="Refresh or read the cached model catalog"
+    )
+    structurer_models.add_argument(
+        "provider", nargs="?", choices=_safe_structure_provider_choices()
+    )
+    structurer_models.add_argument("--refresh", action="store_true")
+    structurer_models.add_argument("--json", action="store_true", dest="as_json")
+    structurer_prompt = structurer_commands.add_parser(
+        "prompt", help="Inspect or configure the custom prompt template"
+    )
+    structurer_prompt.add_argument(
+        "action", choices=["show", "init", "use", "open", "reset"]
+    )
+    structurer_prompt.add_argument("--file")
+    structurer_prompt.add_argument("--json", action="store_true", dest="as_json")
+    structurer_current = structurer_commands.add_parser(
+        "current", help="Show the selected structuring provider"
+    )
+    structurer_current.add_argument("--json", action="store_true", dest="as_json")
+    structurer_use = structurer_commands.add_parser(
+        "use", help="Select a structuring provider without saving a secret"
+    )
+    structurer_use.add_argument("provider", choices=_safe_structure_provider_choices())
+    structurer_use.add_argument("--model")
+    structurer_use.add_argument("--effort")
+    structurer_use.add_argument("--base-url")
+    structurer_use.add_argument("--json", action="store_true", dest="as_json")
 
     serve_parser = subcommands.add_parser("serve", help="Serve the loopback read API")
     serve_parser.add_argument("--port", type=int, default=8765)
@@ -375,6 +446,22 @@ def build_asr_provider(arguments: argparse.Namespace, paths: AppPaths, provider_
     )
 
 
+def build_selected_structure_provider(
+    paths: AppPaths,
+    provider_name: Optional[str],
+    model_override: Optional[str],
+    effort_override: Optional[str],
+) -> Any:
+    settings = AppSettings(paths.settings_file).structure()
+    selected = provider_name or str(settings.get("provider") or "codex")
+    return create_structure_provider(
+        selected,
+        settings=settings,
+        model_override=model_override,
+        effort_override=effort_override,
+    )
+
+
 def run(arguments: argparse.Namespace) -> int:
     # Handle setup before importing heavy dependencies.
     if arguments.command == "setup":
@@ -423,6 +510,145 @@ def run(arguments: argparse.Namespace) -> int:
             settings.save_asr(arguments.provider, arguments.model, arguments.base_url)
             payload = settings.asr()
         emit(payload, arguments.as_json)
+        return 0
+
+    if arguments.command == "structurer":
+        settings = AppSettings(paths.settings_file)
+        if arguments.structurer_command == "providers":
+            from xiaoe_core.secrets import MacKeychainSecretStore
+            secrets = MacKeychainSecretStore()
+            payload = {
+                "providers": [
+                    spec.to_dict(secrets) for spec in list_structure_provider_specs()
+                ]
+            }
+            if arguments.as_json:
+                emit(payload, True)
+            else:
+                current = settings.structure().get("provider", "codex")
+                for spec in payload["providers"]:
+                    marker = "（当前）" if spec["id"] == current else ""
+                    status = "可用" if spec["configured"] else "待配置"
+                    print("{}\t{}\t{}\t{}".format(
+                        spec["id"], spec["label"], status, marker
+                    ))
+            return 0
+        if arguments.structurer_command == "models":
+            from xiaoe_core.secrets import MacKeychainSecretStore
+            saved = settings.structure()
+            provider_id = arguments.provider or saved.get("provider", "codex")
+            provider_settings = saved if provider_id == saved.get("provider") else {}
+            catalog = StructureModelCatalog(paths.data_dir / "structure-models.json")
+            result = catalog.get(
+                provider_id,
+                provider_settings,
+                MacKeychainSecretStore(),
+                force_refresh=arguments.refresh,
+            )
+            if arguments.as_json:
+                emit(result.to_dict(), True)
+            else:
+                print("模型清单：{}".format(provider_id))
+                print("来源：{}".format({
+                    "network": "联网获取",
+                    "cache": "本地缓存",
+                    "built_in": "内置备选清单",
+                }.get(result.source, result.source)))
+                if result.warning:
+                    print("提示：{}".format(result.warning))
+                for index, model in enumerate(result.models, 1):
+                    print("{}. {}".format(index, model))
+            return 0
+        if arguments.structurer_command == "prompt":
+            from xiaoe_core.structurer import (
+                DEFAULT_PROMPT_TEMPLATE,
+                TITLE_PLACEHOLDER,
+                TRANSCRIPT_PLACEHOLDER,
+                build_structure_prompt,
+            )
+            from xiaoe_core.file_opener import open_with_default_app
+            saved = settings.structure()
+            prompt_file = saved.get("prompt_file")
+            if arguments.action in ("init", "open") and not prompt_file:
+                path = paths.data_dir / "structure-prompt.txt"
+                if not path.is_file():
+                    path.write_text(DEFAULT_PROMPT_TEMPLATE, encoding="utf-8")
+                settings.save_structure_prompt(str(path))
+                prompt_file = str(path)
+            elif arguments.action == "use":
+                if not arguments.file:
+                    raise ValueError("structurer prompt use requires --file.")
+                path = Path(arguments.file).expanduser().resolve()
+                try:
+                    template = path.read_text(encoding="utf-8")
+                except OSError as error:
+                    raise ValueError(
+                        "Custom structure prompt cannot be read: {}".format(path)
+                    ) from error
+                build_structure_prompt("Lesson", "Transcript", template)
+                settings.save_structure_prompt(str(path))
+                prompt_file = str(path)
+            elif arguments.action == "reset":
+                settings.save_structure_prompt(None)
+                prompt_file = None
+            if arguments.action == "open":
+                open_with_default_app(Path(str(prompt_file)))
+            payload = {
+                "mode": "custom" if prompt_file else "built_in",
+                "prompt_file": prompt_file,
+                "opened": arguments.action == "open",
+                "optional_placeholders": [
+                    TITLE_PLACEHOLDER, TRANSCRIPT_PLACEHOLDER
+                ],
+            }
+            if arguments.as_json:
+                emit(payload, True)
+            else:
+                print("提示词模式：{}".format(
+                    "本地自定义模板" if prompt_file else "程序内置模板"
+                ))
+                if prompt_file:
+                    print("模板文件：{}".format(prompt_file))
+                print("可选占位符：{} 和 {}".format(
+                    TITLE_PLACEHOLDER, TRANSCRIPT_PLACEHOLDER
+                ))
+                print("未写占位符时，程序会自动附加课程标题和转写全文。")
+            return 0
+        if arguments.structurer_command == "current":
+            payload = settings.structure()
+        else:
+            if arguments.provider == "custom" and not arguments.base_url:
+                raise ValueError("Custom structure provider requires --base-url.")
+            spec = STRUCTURE_PROVIDER_SPECS[arguments.provider]
+            if arguments.effort and arguments.effort not in spec.effort_levels:
+                if spec.effort_levels:
+                    raise ValueError(
+                        "Supported effort levels for {}: {}.".format(
+                            arguments.provider, ", ".join(spec.effort_levels)
+                        )
+                    )
+                raise ValueError(
+                    "{} controls reasoning through model selection.".format(
+                        arguments.provider
+                    )
+                )
+            settings.save_structure(
+                arguments.provider,
+                arguments.model,
+                arguments.base_url,
+                arguments.effort,
+            )
+            payload = settings.structure()
+        if arguments.as_json:
+            emit(payload, True)
+        else:
+            print("当前结构化服务：{}".format(payload.get("provider", "codex")))
+            if payload.get("model"):
+                print("模型：{}".format(payload["model"]))
+            if payload.get("base_url"):
+                print("Base URL：{}".format(payload["base_url"]))
+            if payload.get("effort"):
+                print("思考强度：{}".format(payload["effort"]))
         return 0
 
     if arguments.command == "auth":
@@ -733,7 +959,10 @@ def run(arguments: argparse.Namespace) -> int:
 
     if arguments.command == "structure":
         lessons = LessonService(service.database)
-        structuring = StructureService(service, lessons, CodexCliStructurer(model=arguments.model))
+        structure_provider = build_selected_structure_provider(
+            paths, arguments.provider, arguments.model, arguments.effort
+        )
+        structuring = StructureService(service, lessons, structure_provider)
         result = structuring.structure_course(
             arguments.course_id,
             lesson_id=arguments.lesson_id,
@@ -756,6 +985,13 @@ def run(arguments: argparse.Namespace) -> int:
     if arguments.command == "run":
         lessons = LessonService(service.database)
         provider = build_asr_provider(arguments, paths, arguments.asr_provider)
+        structure_model = arguments.structure_model or arguments.codex_model
+        structure_provider = build_selected_structure_provider(
+            paths,
+            arguments.structure_provider,
+            structure_model,
+            arguments.structure_effort,
+        )
         chrome = build_browser_manager(arguments, paths)
         XiaoeCatalogService(paths, service, lessons, chrome).refresh(arguments.course_id)
         downloads = DownloadService(
@@ -772,7 +1008,7 @@ def run(arguments: argparse.Namespace) -> int:
             lessons,
             provider,
         )
-        structures = StructureService(service, lessons, CodexCliStructurer(model=arguments.codex_model))
+        structures = StructureService(service, lessons, structure_provider)
         result = PipelineRunner(downloads, transcriptions, structures).run(
             arguments.course_id,
             lesson_id=arguments.lesson_id,

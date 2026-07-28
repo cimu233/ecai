@@ -42,9 +42,13 @@ class PipelineRunner:
         download = self.downloads.download_course(course_id, lesson_id=lesson_id, limit=limit)
         if download.processed == 0:
             raise ValueError("该课程尚未扫描内容目录，请先执行「扫描课程目录」。")
-        if download.succeeded == 0 and download.failed > 0:
-            # All lessons failed — likely a text/image-only course with no audio.
-            raise ValueError("该课程所有课时均无可下载的音频，可能为图文公告或纯视频课程（无音频流）。")
+        unavailable_statuses = {"source_unavailable", "unsupported_drm"}
+        if (
+            download.succeeded + download.skipped == 0
+            and download.items
+            and all(item.status in unavailable_statuses for item in download.items)
+        ):
+            raise ValueError("该课程所有课时都未发现可用音频源。")
         transcription = self.transcriptions.transcribe_course(
             course_id, lesson_id=lesson_id, limit=limit, force=force_transcription
         )

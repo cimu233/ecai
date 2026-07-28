@@ -5,10 +5,12 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from .browser import BrowserError
 from .config import AppPaths
 from .downloader import AudioDownloader, write_download_metadata
 from .media import DownloadError, DownloadRequest, MediaResolver, MediaSelector
 from .models import DownloadBatchResult, DownloadItemResult, Lesson
+from .progress import finish_progress
 from .services import CourseService, LessonService
 
 
@@ -38,6 +40,7 @@ class DownloadService:
     ) -> DownloadBatchResult:
         if self.courses.get(course_id) is None:
             raise ValueError("Course does not exist: {}".format(course_id))
+        self.lessons.recover_legacy_browser_failures(course_id)
         lessons = self.lessons.list_for_download(course_id, lesson_id, limit, positions)
         if lesson_id and not lessons:
             raise ValueError("Lesson does not exist in course: {}".format(lesson_id))
@@ -54,9 +57,31 @@ class DownloadService:
                         file_path=existing["file_path"],
                     )
                 )
+                if self.downloader.show_progress:
+                    finish_progress(
+                        "  [{}/{}] 已跳过 ✓  {}（本地音频完整）".format(
+                            idx, total, lesson.title[:40]
+                        )
+                    )
                 continue
             self.downloader.set_progress_context(idx, total)
-            items.append(self._download_lesson(lesson))
+            item = self._download_lesson(lesson)
+            items.append(item)
+            if self.downloader.show_progress and item.status != "audio_ready":
+                label = {
+                    "source_unavailable": "无音频源",
+                    "unsupported_drm": "不支持的 DRM",
+                    "download_failed": "下载失败",
+                }.get(item.status, item.status)
+                finish_progress(
+                    "  [{}/{}] {} ✗  {}{}".format(
+                        idx,
+                        total,
+                        label,
+                        lesson.title[:40],
+                        "：" + item.error if item.error else "",
+                    )
+                )
 
         succeeded = sum(item.status == "audio_ready" for item in items)
         skipped = sum(item.status == "skipped" for item in items)
@@ -114,6 +139,9 @@ class DownloadService:
                     error_code=error.code,
                     error=str(error),
                 )
+            except BrowserError:
+                self.lessons.set_status(lesson.id, "pending_source")
+                raise
             except Exception as error:
                 message = "Unexpected download failure: {}".format(type(error).__name__)
                 self.lessons.set_failure(lesson.id, "download_failed", "unexpected_error", message)

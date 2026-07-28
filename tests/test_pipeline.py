@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from xiaoe_core.pipeline import PipelineRunner
 
@@ -62,6 +63,34 @@ class PipelineRunnerTest(unittest.TestCase):
 
         download.download_course = empty_download
         with self.assertRaisesRegex(ValueError, "尚未扫描内容目录"):
+            PipelineRunner(download, Stage("transcription"), Stage("structure")).run("c")
+
+    def test_existing_audio_allows_pipeline_to_continue_after_other_failures(self):
+        download = Stage("download")
+
+        def resumed_download(course_id, **kwargs):
+            return Result("download", failed=84, processed=94, skipped=10)
+
+        download.download_course = resumed_download
+        transcription = Stage("transcription")
+        result = PipelineRunner(download, transcription, Stage("structure")).run("c")
+
+        self.assertEqual("partial", result.status)
+        self.assertEqual(1, len(transcription.calls))
+
+    def test_no_audio_message_requires_explicit_unavailable_results(self):
+        download = Stage("download")
+
+        def unavailable_download(course_id, **kwargs):
+            result = Result("download", failed=2, processed=2)
+            result.items = [
+                SimpleNamespace(status="source_unavailable"),
+                SimpleNamespace(status="source_unavailable"),
+            ]
+            return result
+
+        download.download_course = unavailable_download
+        with self.assertRaisesRegex(ValueError, "未发现可用音频源"):
             PipelineRunner(download, Stage("transcription"), Stage("structure")).run("c")
 
 

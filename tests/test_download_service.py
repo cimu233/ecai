@@ -5,8 +5,10 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
 from test_downloader import LocalMediaServer
+from xiaoe_core.browser import BrowserError
 from xiaoe_cli.main import main
 from xiaoe_core.config import AppPaths
 from xiaoe_core.database import Database
@@ -86,6 +88,50 @@ class DownloadServiceTest(unittest.TestCase):
         self.assertEqual(1, second.skipped)
         self.assertEqual(1, self.lessons.get(self.lesson.id).attempt_count)
         self.assertEqual("transcript_ready", self.lessons.get(self.lesson.id).status)
+
+    def test_browser_interruption_aborts_batch_without_recording_download_failure(self) -> None:
+        resolver = mock.Mock()
+        resolver.resolve.side_effect = BrowserError("ego_user_control", "Agent control stopped.")
+        service = DownloadService(
+            paths=self.paths,
+            courses=self.courses,
+            lessons=self.lessons,
+            resolver=resolver,
+            selector=MediaSelector(),
+            downloader=AudioDownloader(ffmpeg=ffmpeg_executable(), show_progress=False),
+        )
+
+        with self.assertRaises(BrowserError):
+            service.download_course(self.course.id)
+
+        lesson = self.lessons.get(self.lesson.id)
+        self.assertEqual("pending_source", lesson.status)
+        self.assertIsNone(lesson.last_error_code)
+
+    def test_legacy_browser_failures_are_recovered_before_retry(self) -> None:
+        self.lessons.set_failure(
+            self.lesson.id,
+            "download_failed",
+            "unexpected_error",
+            "Unexpected download failure: BrowserError",
+        )
+        resolver = mock.Mock()
+        resolver.resolve.side_effect = BrowserError("ego_user_control", "Agent control stopped.")
+        service = DownloadService(
+            paths=self.paths,
+            courses=self.courses,
+            lessons=self.lessons,
+            resolver=resolver,
+            selector=MediaSelector(),
+            downloader=AudioDownloader(ffmpeg=ffmpeg_executable(), show_progress=False),
+        )
+
+        with self.assertRaises(BrowserError):
+            service.download_course(self.course.id)
+
+        lesson = self.lessons.get(self.lesson.id)
+        self.assertEqual("pending_source", lesson.status)
+        self.assertIsNone(lesson.error)
 
     def test_cli_download_outputs_frontend_ready_json(self) -> None:
         output = io.StringIO()

@@ -242,6 +242,23 @@ class LessonService:
             parameters.append(limit)
         return [lesson_from_row(row) for row in self.database.rows(query, tuple(parameters))]
 
+    def recover_legacy_browser_failures(self, course_id: str) -> int:
+        """Reset rows polluted by the old broad BrowserError catch."""
+        timestamp = utc_now()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE lessons
+                SET status = 'pending_source', error = NULL, last_error_code = NULL,
+                    last_error_at = NULL, updated_at = ?
+                WHERE course_id = ?
+                  AND last_error_code = 'unexpected_error'
+                  AND error = 'Unexpected download failure: BrowserError'
+                """,
+                (timestamp, course_id),
+            )
+            return cursor.rowcount
+
     def begin_attempt(self, lesson_id: str) -> None:
         self._update(
             lesson_id,

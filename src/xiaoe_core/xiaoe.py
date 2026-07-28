@@ -102,6 +102,8 @@ class XiaoeCatalogService:
         course = self.courses.get(course_id)
         if course is None:
             raise ValueError("Course does not exist: {}".format(course_id))
+        # Restarting a menu action explicitly resumes the dedicated browser task.
+        self.chrome.ensure_running(visible=False)
         raw_path = self.paths.courses_dir / course.id / "catalog.raw.json"
         cached_items = self._cached_items(raw_path)
         try:
@@ -505,23 +507,37 @@ class XiaoeBrowserMediaResolver:
     @staticmethod
     def _play_expression() -> str:
         return """(() => {
-          // Click every visible play button — Xiaoe uses several widget flavours.
-          const buttons = [...document.querySelectorAll('button,[role="button"],div[class*="play"],span[class*="play"],i[class*="play"]')];
-          let clicked = 0;
-          for (const btn of buttons) {
-            const text = (btn.innerText || btn.getAttribute('aria-label') || btn.title || '').toLowerCase();
-            const cls = (btn.className || '').toString().toLowerCase();
-            if (/播放|play|audio|video|start|begin/i.test(text + cls)) {
-              try { btn.click(); clicked += 1; } catch(e) {}
-            }
-          }
-          // Also try native media elements.
           const media = [...document.querySelectorAll('audio,video')];
           media.forEach(node => { try { node.play(); } catch(e) {} });
-          // Some pages hide the player until a wrapper is clicked.
-          const wrappers = [...document.querySelectorAll('[class*="player"],[class*="audio"],[class*="video"],[class*="sound"]')];
-          wrappers.forEach(node => { try { node.click(); } catch(e) {} });
-          return {media: media.length, buttons_clicked: clicked};
+
+          const selectors = [
+            'button[aria-label*="播放"]',
+            'button[title*="播放"]',
+            '[role="button"][aria-label*="播放"]',
+            'button[aria-label*="play" i]',
+            'button[title*="play" i]',
+            '[role="button"][aria-label*="play" i]',
+            '.vjs-big-play-button',
+            '.xgplayer-start',
+            '.dplayer-play-icon'
+          ];
+          const candidates = [...new Set(selectors.flatMap(selector =>
+            [...document.querySelectorAll(selector)]
+          ))];
+          const blocked = /诊断|网络|测速|帮助|反馈|报错|diagnostic|network|speed|help|feedback|error/i;
+          const button = candidates.find(node => {
+            const label = [
+              node.innerText,
+              node.getAttribute('aria-label'),
+              node.getAttribute('title')
+            ].filter(Boolean).join(' ');
+            const rect = node.getBoundingClientRect();
+            return !blocked.test(label) && rect.width > 0 && rect.height > 0;
+          });
+          if (button) {
+            try { button.click(); } catch(e) {}
+          }
+          return {media: media.length, button_clicked: !!button};
         })()"""
 
     @staticmethod

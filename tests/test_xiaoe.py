@@ -16,6 +16,14 @@ from xiaoe_core.xiaoe import (
 
 
 class XiaoeParsingTest(unittest.TestCase):
+    def test_playback_expression_avoids_blanket_player_container_clicks(self):
+        expression = XiaoeBrowserMediaResolver._play_expression()
+
+        self.assertIn("diagnostic|network", expression)
+        self.assertIn(".vjs-big-play-button", expression)
+        self.assertNotIn("wrappers.forEach", expression)
+        self.assertNotIn("div[class*=\"play\"]", expression)
+
     def test_catalog_items_are_found_recursively_and_deduplicated(self):
         payload = {
             "data": {

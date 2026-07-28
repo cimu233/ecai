@@ -68,6 +68,40 @@ class BrowserHelpersTest(unittest.TestCase):
         self.assertIn("my_attend_normal_list.get", prefix)
         self.assertIn("get_new_gateway", prefix)
         self.assertIn("course_123", prefix)
+        self.assertIn("cleanupOperationTabs", prefix)
+
+    def test_ego_run_reclaims_user_owned_task_and_removes_diagnostic_tabs(self):
+        scripts = []
+
+        def runner(script):
+            scripts.append(script)
+            return {"value": {"taskId": 11}}
+
+        manager = EgoBrowserManager(cli=EgoCli(runner=runner))
+
+        self.assertEqual("11", manager.ensure_running())
+        self.assertIn("claimTaskSpace(existing.id)", scripts[0])
+        self.assertIn("diting.bytedance.com", scripts[0])
+
+    def test_media_capture_always_cleans_tabs_created_by_playback(self):
+        scripts = []
+
+        def runner(script):
+            scripts.append(script)
+            return {
+                "value": {
+                    "state": {"url": "https://example.com", "body": ""},
+                    "events": [],
+                    "cookies": [],
+                }
+            }
+
+        manager = EgoBrowserManager(cli=EgoCli(runner=runner))
+        manager.capture_media("https://example.com/lesson", "(() => null)()", 0)
+
+        self.assertIn("finally {", scripts[0])
+        self.assertIn("await cleanupOperationTabs()", scripts[0])
+        self.assertIn("if (!baselineTabIds.has(candidate.targetId))", scripts[0])
 
     def test_ego_running_process_is_reused(self):
         process_runner = mock.Mock(return_value=mock.Mock(returncode=0))

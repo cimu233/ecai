@@ -2,7 +2,7 @@
 
 An original local-first pipeline for authorized Xiaoe courses:
 
-`Xiaoe catalog -> audio-only download -> local Qwen3-ASR -> Codex structure -> Markdown`
+`Xiaoe catalog -> audio-only download -> ASR -> selectable structuring provider -> Markdown`
 
 The CLI owns all write operations. A loopback read API is available for a future optional frontend.
 
@@ -86,7 +86,7 @@ origins already exist in the local list, each origin is scanned once.
 ./scripts/setup_local_asr.sh
 ```
 
-The runtime lives in `.local-asr-venv`. It does not change `PATH` or shell configuration and does not copy the model weights. Desktop menu item 10 selects another ASR service and stores its credentials in macOS Keychain.
+The runtime lives in `.local-asr-venv`. It does not change `PATH` or shell configuration and does not copy the model weights. Desktop menu item 15 selects another ASR service and stores its credentials in macOS Keychain.
 
 Supported ASR providers:
 
@@ -110,7 +110,55 @@ xiaoe asr current --json
 xiaoe asr use openai --model gpt-4o-mini-transcribe
 ```
 
-4. Run the complete workflow:
+4. Select a structuring provider. Desktop menu item 16 provides the same choices:
+
+| Provider | Mode | Default model | Thought control | Credential |
+| --- | --- | --- | --- | --- |
+| Codex | Local agent CLI | Account default | `minimal` to `xhigh` | Existing Codex login |
+| Claude Code | Local agent CLI | `sonnet` | `low` to `max` | Existing Claude Code login |
+| OpenAI | Responses API | `gpt-5-mini` | `none` to `xhigh`, model-dependent | API Key |
+| Anthropic | Messages API | `claude-sonnet-4-6` | Levels returned by model capabilities | API Key |
+| DeepSeek | OpenAI-compatible API | `deepseek-chat` | Select a reasoning model | API Key |
+| Alibaba Model Studio | OpenAI-compatible API | `qwen-plus` | Model-dependent effort | DashScope API Key |
+| Custom | OpenAI-compatible API | User-selected | Generic reasoning effort | API Key + Base URL |
+
+```bash
+xiaoe structurer providers
+xiaoe structurer current
+xiaoe structurer models openai
+xiaoe structurer models openai --refresh
+xiaoe structurer use claude-code --model sonnet --effort medium
+xiaoe structurer use openai --model gpt-5-mini --effort medium
+xiaoe structurer prompt init
+xiaoe structurer prompt show
+xiaoe structurer prompt open
+```
+
+Provider and model choices are saved in `settings.json`. API keys are kept in
+macOS Keychain and never written to that settings file. Local agents run as
+single-use, non-interactive jobs with tool access disabled or read-only.
+
+The desktop selector shows ten models per page and always allows a manually
+entered model ID. API model catalogs are fetched with a three-second timeout and
+stored in `~/.xiaoe-audio-pipeline/structure-models.json`. A fresh cache is used
+for six hours. Later refreshes send `ETag` or `Last-Modified` validators when the
+provider supplies them. A failed refresh uses the cached list and suppresses
+repeat network waits for 30 minutes. Local-agent aliases use a built-in list
+because their CLIs do not expose a stable model-list endpoint.
+
+`structurer prompt init` creates and enables
+`~/.xiaoe-audio-pipeline/structure-prompt.txt`. Edit that file to customize the
+role, organization rules, tone, cleanup policy, or level of detail.
+`{{LESSON_TITLE}}` and `{{TRANSCRIPT}}` are optional placement markers. When
+either marker is absent, the program appends that input to the end of the
+template automatically. Changes take effect on the next structuring run.
+Use `structurer prompt use --file /absolute/path/prompt.txt` for another file,
+`structurer prompt open` to launch the selected template in the system default
+text editor, or `structurer prompt reset` to restore the built-in faithful-note prompt. The
+desktop provider configuration offers the same choices without opening another
+application.
+
+5. Run the complete workflow:
 
 ```bash
 xiaoe run COURSE_ID --language zh --json
@@ -128,6 +176,7 @@ xiaoe run COURSE_ID --limit 1 --language zh --json
 xiaoe download COURSE_ID --limit 1 --json
 xiaoe transcribe COURSE_ID --limit 1 --language zh --json
 xiaoe structure COURSE_ID --limit 1 --json
+xiaoe structure COURSE_ID --limit 1 --provider claude-code --model sonnet --effort medium
 xiaoe status --json
 ```
 
@@ -164,7 +213,8 @@ Desktop menu item 1 runs `auth login` directly and never asks for a course URL.
 - Standard AES-128 HLS is handled by ffmpeg. SAMPLE-AES and DRM are reported as unsupported.
 - Long audio is split locally into provider-sized, 16 kHz mono chunks. Baidu uses 55-second WAV chunks; the other current providers use four-minute MP3 chunks. The local Qwen worker loads the model once and transcribes all chunks through Apple MPS.
 - Raw provider responses, normalized transcripts, plain text, structured JSON, and Markdown notes are all retained.
-- Codex runs ephemerally in a read-only sandbox and returns schema-constrained note data.
+- Codex runs ephemerally in a read-only sandbox. Claude Code runs without tools or session persistence. Both return schema-constrained note data.
+- API structurers receive the same fidelity prompt and JSON schema. The OpenAI adapter disables response storage.
 
 Per-lesson output:
 
@@ -196,9 +246,9 @@ The service binds only to `127.0.0.1`. It is intended for a local frontend and h
 
 ## Current Verification Boundary
 
-Automated tests cover database migration, paginated course selection, Chrome session helpers, direct and HLS downloads, AES-128, cloud and persistent local ASR adapters, cloud request signing/normalization, chunk merging, Codex output handling, pipeline orchestration, and the local API.
+Automated tests cover database migration, paginated course selection, Chrome session helpers, direct and HLS downloads, AES-128, cloud and persistent local ASR adapters, cloud request signing/normalization, chunk merging, local-agent and API structuring, pipeline orchestration, and the local API.
 
-The authorized Xiaoe course catalog, paginated picker, media-source capture, download start, and local Qwen inference have been live-tested. Cloud adapters have protocol-level tests; each cloud service still needs a first live request with your own credential. Interactive login challenges still require user action when Xiaoe expires the saved session.
+The authorized Xiaoe course catalog, paginated picker, media-source capture, download start, and local Qwen inference have been live-tested. Cloud ASR and structuring adapters have protocol-level tests; each cloud service still needs a first live request with your own credential. Codex and Claude Code executable availability is checked locally; their first real structuring job uses the login already held by each CLI. Interactive login challenges still require user action when Xiaoe expires the saved session.
 
 ## Safety
 

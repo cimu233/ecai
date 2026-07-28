@@ -5,15 +5,23 @@ from pathlib import Path
 from typing import Optional
 
 from .models import StructureBatchResult, StructureItemResult
+from .progress import finish_progress, update_progress
 from .services import CourseService, LessonService
 from .structurer import StructureError, StructureProvider, render_markdown
 
 
 class StructureService:
-    def __init__(self, courses: CourseService, lessons: LessonService, provider: StructureProvider) -> None:
+    def __init__(
+        self,
+        courses: CourseService,
+        lessons: LessonService,
+        provider: StructureProvider,
+        show_progress: bool = True,
+    ) -> None:
         self.courses = courses
         self.lessons = lessons
         self.provider = provider
+        self.show_progress = show_progress
 
     def structure_course(
         self, course_id: str, lesson_id: Optional[str] = None, limit: Optional[int] = None, force: bool = False
@@ -23,7 +31,29 @@ class StructureService:
         lessons = self.lessons.list_for_download(course_id, lesson_id, limit)
         if lesson_id and not lessons:
             raise ValueError("Lesson does not exist in course: {}".format(lesson_id))
-        items = [self._structure_lesson(lesson.id, lesson.title, force) for lesson in lessons]
+        items = []
+        total = len(lessons)
+        for index, lesson in enumerate(lessons, 1):
+            if self.show_progress:
+                update_progress(
+                    "  [{}/{}] 结构化整理：{}".format(
+                        index, total, lesson.title[:40]
+                    )
+                )
+            item = self._structure_lesson(lesson.id, lesson.title, force)
+            items.append(item)
+            if self.show_progress:
+                label = {
+                    "completed": "整理完成 ✓",
+                    "skipped": "已跳过 ✓",
+                    "transcript_missing": "缺少转写 ✗",
+                    "structure_failed": "整理失败 ✗",
+                }.get(item.status, item.status)
+                finish_progress(
+                    "  [{}/{}] {}  {}".format(
+                        index, total, label, lesson.title[:40]
+                    )
+                )
         succeeded = sum(item.status == "completed" for item in items)
         skipped = sum(item.status == "skipped" for item in items)
         return StructureBatchResult(

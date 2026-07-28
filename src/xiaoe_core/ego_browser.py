@@ -208,7 +208,21 @@ class EgoBrowserManager:
 
     def ensure_running(self, visible: bool = False, initial_url: str = "about:blank") -> str:
         script = """
-const task = await useOrCreateTaskSpace({task_name})
+const spaces = await listTaskSpaces()
+const existing = spaces.find(space =>
+  space.name === {task_name} || space.taskId === {task_name}
+)
+const task = existing && existing.ownership !== 'agent'
+  ? await claimTaskSpace(existing.id)
+  : await useOrCreateTaskSpace({task_name})
+const tabs = await listTabs()
+for (const tab of tabs) {{
+  const url = String(tab.url || '')
+  const title = String(tab.title || '')
+  if (url.includes('diting.bytedance.com/') || title.includes('字节跳动网络诊断工具')) {{
+    await closeTab(tab.targetId)
+  }}
+}}
 cliLog({marker} + JSON.stringify({{"taskId": task.id}}))
 """.format(
             task_name=json.dumps(self.task_name),
@@ -332,6 +346,8 @@ cliLog({marker} + JSON.stringify({{state, rows}}))
 
     def capture_media(self, url: str, expression: str, wait_seconds: float) -> Dict[str, Any]:
         script = self._operation_prefix(url) + """
+let captureResult
+try {{
 const state = await js(String.raw`({{
   url: location.href,
   title: document.title,
@@ -389,12 +405,15 @@ for (const url of [...new Set(discoveredUrls)]) {{
   }})
 }}
 const cookieResult = await cdp('Storage.getCookies')
-await closeTab(tab.targetId)
-cliLog({marker} + JSON.stringify({{
+captureResult = {{
   state,
   events: mediaEvents,
   cookies: cookieResult.cookies || []
-}}))
+}}
+}} finally {{
+  await cleanupOperationTabs()
+}}
+cliLog({marker} + JSON.stringify(captureResult))
 """.format(
             expression=json.dumps(expression, ensure_ascii=False),
             wait_seconds=max(0.0, wait_seconds),
@@ -510,6 +529,8 @@ cliLog({marker} + JSON.stringify(result))
         return "\n".join(
             [
                 "const task = await useOrCreateTaskSpace({})".format(json.dumps(self.task_name)),
+                "const tabsBefore = await listTabs()",
+                "const baselineTabIds = new Set(tabsBefore.map(tab => tab.targetId))",
                 "const requestedUrl = {}".format(json.dumps(url)),
                 "await openOrReuseTab('about:blank', {wait: true, timeout: 20})",
                 "await cdp('Page.enable')",
@@ -528,6 +549,14 @@ cliLog({marker} + JSON.stringify(result))
                 "}",
                 "await gotoAndWait(requestedUrl, {timeout: 30, settle: 1})",
                 "const tab = await currentTab()",
+                "const cleanupOperationTabs = async () => {",
+                "  const tabsAfter = await listTabs()",
+                "  for (const candidate of tabsAfter) {",
+                "    if (!baselineTabIds.has(candidate.targetId)) {",
+                "      await closeTab(candidate.targetId)",
+                "    }",
+                "  }",
+                "}",
                 "",
             ]
         )
