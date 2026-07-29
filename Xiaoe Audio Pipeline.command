@@ -70,6 +70,95 @@ download_flow() {
   fi
 }
 
+schedule_menu() {
+  while true; do
+    clear
+    cat <<'SCHEDULE_MENU'
+========================================
+            课程定时监控
+========================================
+1. 添加或修改课程监控
+2. 查看监控列表
+3. 启用一门课程
+4. 暂停一门课程
+5. 立即检查一门课程
+6. 删除一门课程监控
+7. 启动后台服务
+8. 停止后台服务
+9. 查看最近运行记录
+10. 返回主菜单
+========================================
+SCHEDULE_MENU
+    printf "请选择："
+    read -r schedule_choice
+    case "$schedule_choice" in
+      1)
+        course_id="$(select_course)"
+        if [[ -n "$course_id" ]]; then
+          echo ""
+          echo "频率示例：30m（30 分钟）、2h（2 小时）、1d（1 天）"
+          printf "检查频率："
+          read -r interval
+          run_xiaoe schedule add "$course_id" --every "$interval"
+        fi
+        pause_screen
+        ;;
+      2)
+        run_xiaoe schedule list
+        pause_screen
+        ;;
+      3)
+        course_id="$(select_course)"
+        if [[ -n "$course_id" ]]; then
+          run_xiaoe schedule enable "$course_id"
+        fi
+        pause_screen
+        ;;
+      4)
+        course_id="$(select_course)"
+        if [[ -n "$course_id" ]]; then
+          run_xiaoe schedule disable "$course_id"
+        fi
+        pause_screen
+        ;;
+      5)
+        course_id="$(select_course)"
+        if [[ -n "$course_id" ]]; then
+          echo "正在检查课程更新，主界面可以保持关闭..."
+          run_xiaoe schedule run-now "$course_id"
+        fi
+        pause_screen
+        ;;
+      6)
+        course_id="$(select_course)"
+        if [[ -n "$course_id" ]]; then
+          run_xiaoe schedule remove "$course_id"
+        fi
+        pause_screen
+        ;;
+      7)
+        run_xiaoe schedule start
+        pause_screen
+        ;;
+      8)
+        run_xiaoe schedule stop
+        pause_screen
+        ;;
+      9)
+        run_xiaoe schedule logs
+        pause_screen
+        ;;
+      10)
+        return
+        ;;
+      *)
+        echo "无效选项。"
+        sleep 1
+        ;;
+    esac
+  done
+}
+
 if [[ ! -d "$project_dir/src/xiaoe_cli" ]]; then
   echo "找不到项目：$project_dir"
   pause_screen
@@ -113,8 +202,9 @@ while true; do
 15. 配置语音转文字服务
 16. 配置结构化生成服务
 17. 检查本地 Qwen ASR
+18. 课程定时监控
 
-18. 退出
+19. 退出
 ========================================
 MENU
   printf "请选择："
@@ -311,6 +401,9 @@ PY
       pause_screen
       ;;
     18)
+      schedule_menu
+      ;;
+    19)
       exit 0
       ;;
     *)

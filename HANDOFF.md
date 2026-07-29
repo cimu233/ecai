@@ -242,4 +242,20 @@ python3 -m pytest tests/ -v
 
 ---
 
+## 十一、课程定时监控
+
+2026-07-29 新增课程级后台监控：
+
+- `src/xiaoe_core/scheduler.py` 保存计划、判断到期时间、阻止并发运行，并调用现有完整流水线。
+- `src/xiaoe_core/scheduler_service.py` 负责 macOS `launchd` 与 Windows 工作排程器。
+- `ecai schedule add COURSE_ID --every 30m` 添加监控并启动后台服务。
+- `ecai schedule stop` 停止整个后台服务，同时保留课程配置。
+- `ecai schedule disable COURSE_ID` 只暂停指定课程。
+- `~/.xiaoe-audio-pipeline/schedules.json` 保存非敏感计划配置。
+- `~/.xiaoe-audio-pipeline/scheduler.log` 保存脱敏运行结果。
+- PyInstaller 构建必须保留 `xiaoe_core.scheduler` 和
+  `xiaoe_core.scheduler_service` 两个 hidden import。
+
+---
+
 *文档生成于 2026-07-25，写给下一个接手的 AI。祝构建顺利！*

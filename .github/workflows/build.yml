@@ -33,6 +33,7 @@ jobs:
             --hidden-import xiaoe_core.asr --hidden-import xiaoe_core.asr_registry `
             --hidden-import xiaoe_core.auth --hidden-import xiaoe_core.secrets `
             --hidden-import xiaoe_core.slider_captcha --hidden-import xiaoe_core.api `
+            --hidden-import xiaoe_core.scheduler --hidden-import xiaoe_core.scheduler_service `
             --hidden-import xiaoe_cli --hidden-import xiaoe_cli.main `
             --hidden-import xiaoe_cli.setup --hidden-import xiaoe_cli.course_picker `
             --collect-all pip `
@@ -87,6 +88,7 @@ jobs:
             --hidden-import xiaoe_core.asr --hidden-import xiaoe_core.asr_registry `
             --hidden-import xiaoe_core.auth --hidden-import xiaoe_core.secrets `
             --hidden-import xiaoe_core.slider_captcha --hidden-import xiaoe_core.api `
+            --hidden-import xiaoe_core.scheduler --hidden-import xiaoe_core.scheduler_service `
             --hidden-import xiaoe_cli --hidden-import xiaoe_cli.main `
             --hidden-import xiaoe_cli.setup --hidden-import xiaoe_cli.course_picker `
             --collect-all websocket --collect-all imageio_ffmpeg `

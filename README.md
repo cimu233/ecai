@@ -246,6 +246,55 @@ notes.data.json
 notes.md
 ```
 
+## Background Course Monitoring
+
+Each saved course can be checked on its own interval. A due check validates the
+saved Xiaoe session, refreshes the course catalog, and runs the existing
+incremental pipeline. Completed lessons are skipped, while newly discovered
+lessons continue through audio download, ASR, and structured Markdown.
+
+Add a monitor and start the native background service:
+
+```bash
+xiaoe schedule add COURSE_ID --every 30m
+xiaoe schedule add ANOTHER_COURSE_ID --every 2h
+```
+
+Supported frequency suffixes are `m` for minutes, `h` for hours, and `d` for
+days. The minimum interval is one minute. The operating system wakes one small
+worker every minute; only courses whose own interval has expired are processed.
+
+Manage monitoring:
+
+```bash
+xiaoe schedule list
+xiaoe schedule disable COURSE_ID
+xiaoe schedule enable COURSE_ID
+xiaoe schedule run-now COURSE_ID
+xiaoe schedule remove COURSE_ID
+xiaoe schedule logs --limit 30
+```
+
+Control the shared background service while keeping every course setting:
+
+```bash
+xiaoe schedule start
+xiaoe schedule stop
+xiaoe schedule status
+xiaoe schedule uninstall
+```
+
+macOS uses a per-user launch agent at
+`~/Library/LaunchAgents/com.ecai.course-monitor.plist`. Windows uses a per-user
+Task Scheduler entry named `ECAI Course Monitor`. The main menu and Terminal may
+remain closed. Schedule state and recent results are stored under
+`~/.xiaoe-audio-pipeline/` in `schedules.json` and `scheduler.log`.
+
+Background browser operations request hidden/background mode. If login expires,
+credentials are missing, or an Ego Task Space is under user control, that run is
+recorded as failed and the next scheduled check can try again. Interactive
+verification remains available through the normal login menu.
+
 ## Local API
 
 ```bash

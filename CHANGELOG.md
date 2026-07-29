@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased - 2026-07-29
+
+### Added
+
+- Added per-course update monitoring with configurable minute, hour, or day
+  intervals.
+- Added enable, pause, remove, run-now, status, and recent-log commands.
+- Added a single-instance background worker that checks authentication, refreshes
+  the catalog, and reuses the existing incremental download, ASR, and structuring
+  pipeline.
+- Added native background service adapters for macOS launchd and Windows Task
+  Scheduler.
+- Added a desktop submenu for managing course monitoring without copying course
+  IDs.
+
+### Safety
+
+- Background runs never wait for terminal input or intentionally focus a browser
+  window.
+- Worker logs redact signed URL query strings and authorization headers.
+- Schedule configuration and logs are private local files and contain no account
+  password, Cookie, or API key.
+- A process lock prevents overlapping course runs and recovers automatically
+  from stale lock files.
+
 ## 0.2.1 - 2026-07-29
 
 ### Fixed

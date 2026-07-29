@@ -320,6 +320,53 @@ def build_parser() -> argparse.ArgumentParser:
     structurer_use.add_argument("--base-url")
     structurer_use.add_argument("--json", action="store_true", dest="as_json")
 
+    schedule_parser = subcommands.add_parser(
+        "schedule", help="Monitor courses and process updates in the background"
+    )
+    schedule_commands = schedule_parser.add_subparsers(
+        dest="schedule_command", required=True
+    )
+    schedule_add = schedule_commands.add_parser(
+        "add", help="Add or update one course monitor"
+    )
+    schedule_add.add_argument("course_id")
+    schedule_add.add_argument(
+        "--every", required=True, help="Check frequency, for example 30m, 2h, or 1d"
+    )
+    schedule_add.add_argument("--disabled", action="store_true")
+    schedule_add.add_argument("--json", action="store_true", dest="as_json")
+    schedule_list = schedule_commands.add_parser(
+        "list", help="List configured course monitors"
+    )
+    schedule_list.add_argument("--json", action="store_true", dest="as_json")
+    for action, help_text in (
+        ("enable", "Enable one course monitor"),
+        ("disable", "Pause one course monitor"),
+        ("remove", "Delete one course monitor"),
+        ("run-now", "Run one course monitor immediately"),
+    ):
+        command = schedule_commands.add_parser(action, help=help_text)
+        command.add_argument("course_id")
+        command.add_argument("--json", action="store_true", dest="as_json")
+    for action, help_text in (
+        ("install", "Install and start the operating-system background service"),
+        ("start", "Start the saved background service"),
+        ("stop", "Stop the background service without deleting schedules"),
+        ("uninstall", "Remove the background service without deleting schedules"),
+        ("status", "Show background service and monitor status"),
+    ):
+        command = schedule_commands.add_parser(action, help=help_text)
+        command.add_argument("--json", action="store_true", dest="as_json")
+    schedule_logs = schedule_commands.add_parser(
+        "logs", help="Show recent background monitor results"
+    )
+    schedule_logs.add_argument("--limit", type=int, default=20)
+    schedule_logs.add_argument("--json", action="store_true", dest="as_json")
+    schedule_worker = schedule_commands.add_parser(
+        "worker", help=argparse.SUPPRESS
+    )
+    schedule_worker.add_argument("--json", action="store_true", dest="as_json")
+
     serve_parser = subcommands.add_parser("serve", help="Serve the loopback read API")
     serve_parser.add_argument("--port", type=int, default=8765)
     return parser
@@ -531,11 +578,229 @@ def build_selected_structure_provider(
     )
 
 
+def run_schedule(arguments: argparse.Namespace) -> int:
+    from xiaoe_core.config import AppPaths
+    from xiaoe_core.database import Database
+    from xiaoe_core.scheduler import (
+        ScheduleStore,
+        build_monitor_worker,
+        format_interval,
+        parse_interval,
+    )
+    from xiaoe_core.scheduler_service import build_scheduler_service
+    from xiaoe_core.services import CourseService
+    from xiaoe_cli.course_picker import table_cell
+
+    paths = AppPaths.resolve(arguments.data_dir)
+    paths.create()
+    courses = CourseService(Database(paths.database_file))
+    store = ScheduleStore(paths.data_dir / "schedules.json")
+    worker = build_monitor_worker(paths)
+    command = arguments.schedule_command
+
+    if command == "worker":
+        result = worker.run()
+        emit(result, arguments.as_json)
+        return 0 if result["status"] in {"completed", "busy"} else 1
+
+    if command == "run-now":
+        if courses.get(arguments.course_id) is None:
+            raise ValueError("课程不存在：{}".format(arguments.course_id))
+        result = worker.run(force_course_id=arguments.course_id)
+        if arguments.as_json:
+            emit(result, True)
+        else:
+            if result["status"] == "busy":
+                print("已有后台课程任务正在运行，本次没有重复启动。")
+            for item in result["items"]:
+                title = courses.get(item["course_id"])
+                print(
+                    "{}：{}，新增 {} 节。".format(
+                        title.title if title else item["course_id"],
+                        {
+                            "completed": "检查完成",
+                            "partial": "部分处理失败",
+                            "failed": "检查失败",
+                        }.get(item["status"], item["status"]),
+                        item.get("new_lessons", 0),
+                    )
+                )
+                if item.get("error"):
+                    print("  原因：{}".format(item["error"]))
+            print("后台日志：{}".format(paths.data_dir / "scheduler.log"))
+        return 0 if result["status"] in {"completed", "busy"} else 1
+
+    if command == "add":
+        course = courses.get(arguments.course_id)
+        if course is None:
+            raise ValueError("课程不存在：{}".format(arguments.course_id))
+        item = store.upsert(
+            arguments.course_id,
+            parse_interval(arguments.every),
+            enabled=not arguments.disabled,
+        )
+        service_state = None
+        if item.enabled:
+            service_state = build_scheduler_service(paths).start()
+        payload = {
+            **item.to_dict(),
+            "course_title": course.title,
+            "interval": format_interval(item.interval_seconds),
+            "service": service_state,
+        }
+        if arguments.as_json:
+            emit(payload, True)
+        else:
+            print("已设置课程监控：{}".format(course.title))
+            print("检查频率：{}".format(payload["interval"]))
+            print("状态：{}".format("运行中" if item.enabled else "已暂停"))
+            print("下次检查：{}".format(item.next_run_at))
+        return 0
+
+    if command in {"enable", "disable"}:
+        course = courses.get(arguments.course_id)
+        if course is None:
+            raise ValueError("课程不存在：{}".format(arguments.course_id))
+        item = store.set_enabled(arguments.course_id, command == "enable")
+        service_state = None
+        if item.enabled:
+            service_state = build_scheduler_service(paths).start()
+        elif not any(schedule.enabled for schedule in store.list()):
+            service_state = build_scheduler_service(paths).stop()
+        payload = {
+            **item.to_dict(),
+            "course_title": course.title,
+            "interval": format_interval(item.interval_seconds),
+            "service": service_state,
+        }
+        if arguments.as_json:
+            emit(payload, True)
+        else:
+            print(
+                "{}：{}".format(
+                    "已启用定时监控" if item.enabled else "已暂停定时监控",
+                    course.title,
+                )
+            )
+        return 0
+
+    if command == "remove":
+        removed = store.remove(arguments.course_id)
+        if not any(schedule.enabled for schedule in store.list()):
+            build_scheduler_service(paths).stop()
+        payload = {"course_id": arguments.course_id, "removed": removed}
+        if arguments.as_json:
+            emit(payload, True)
+        else:
+            print("定时监控已删除。" if removed else "没有找到该课程的定时监控。")
+        return 0
+
+    if command == "logs":
+        logs = worker.recent_logs(arguments.limit)
+        if arguments.as_json:
+            emit({"logs": logs}, True)
+        elif not logs:
+            print("尚无后台运行记录。")
+        else:
+            for item in logs:
+                course = courses.get(str(item.get("course_id") or ""))
+                print(
+                    "{}  {}  {}  新增 {} 节".format(
+                        item.get("time") or "",
+                        course.title if course else item.get("course_id") or "",
+                        item.get("status") or "",
+                        item.get("new_lessons") or 0,
+                    )
+                )
+                if item.get("error"):
+                    print("  原因：{}".format(item["error"]))
+        return 0
+
+    service = build_scheduler_service(paths)
+    if command == "install":
+        state = service.install()
+    elif command == "start":
+        state = service.start()
+    elif command == "stop":
+        state = service.stop()
+    elif command == "uninstall":
+        state = service.uninstall()
+    elif command == "status":
+        state = service.status()
+    elif command == "list":
+        state = service.status()
+    else:
+        raise RuntimeError("未知定时任务命令：{}".format(command))
+
+    schedules = []
+    for item in store.list():
+        course = courses.get(item.course_id)
+        schedules.append(
+            {
+                **item.to_dict(),
+                "course_title": course.title if course else item.course_id,
+                "interval": format_interval(item.interval_seconds),
+            }
+        )
+    payload = {"service": state, "schedules": schedules}
+    if arguments.as_json:
+        emit(payload, True)
+        return 0
+    if command in {"list", "status"}:
+        print(
+            "后台服务：{}".format(
+                "运行中"
+                if state["running"]
+                else ("已停止" if state["installed"] else "尚未安装")
+            )
+        )
+        if not schedules:
+            print("尚未设置课程监控。")
+        else:
+            print()
+            print(
+                "{}  {}  {}  {}  {}".format(
+                    table_cell("课程", 32),
+                    table_cell("频率", 10),
+                    table_cell("状态", 10),
+                    table_cell("下次检查", 27),
+                    "最近结果",
+                )
+            )
+            print("-" * 98)
+            for item in schedules:
+                print(
+                    "{}  {}  {}  {}  {}".format(
+                        table_cell(item["course_title"], 32),
+                        table_cell(item["interval"], 10),
+                        table_cell(
+                            "运行中" if item["enabled"] else "已暂停", 10
+                        ),
+                        table_cell(item["next_run_at"], 27),
+                        item["last_status"] or "尚未运行",
+                    )
+                )
+    else:
+        print(
+            "后台服务{}。".format(
+                {
+                    "install": "已安装并启动",
+                    "start": "已启动",
+                    "stop": "已停止，课程配置已保留",
+                    "uninstall": "已移除，课程配置已保留",
+                }[command]
+            )
+        )
+    return 0
+
+
 def run(arguments: argparse.Namespace) -> int:
     # Handle setup before importing heavy dependencies.
     if arguments.command == "setup":
         from xiaoe_cli.setup import run_setup
         return run_setup(interactive=not getattr(arguments, "yes", False))
+    if arguments.command == "schedule":
+        return run_schedule(arguments)
 
     _lazy_imports()
 
@@ -1210,3 +1475,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     except (ValueError, RuntimeError) as error:
         print("error: {}".format(error), file=sys.stderr)
         return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
