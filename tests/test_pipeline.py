@@ -51,6 +51,19 @@ class PipelineRunnerTest(unittest.TestCase):
         self.assertEqual(1, transcription.calls[0][1]["limit"])
         self.assertEqual("structure", result.structure["stage"])
 
+    def test_run_passes_retry_positions_to_every_stage(self):
+        download = Stage("download")
+        transcription = Stage("transcription")
+        structure = Stage("structure")
+
+        PipelineRunner(download, transcription, structure).run(
+            "course_1", positions={2, 4, 8}
+        )
+
+        self.assertEqual({2, 4, 8}, download.calls[0][1]["positions"])
+        self.assertEqual({2, 4, 8}, transcription.calls[0][1]["positions"])
+        self.assertEqual({2, 4, 8}, structure.calls[0][1]["positions"])
+
     def test_any_stage_failure_marks_run_partial(self):
         result = PipelineRunner(Stage("download"), Stage("transcription", 1), Stage("structure")).run("c")
         self.assertEqual("partial", result.status)
@@ -92,6 +105,21 @@ class PipelineRunnerTest(unittest.TestCase):
         download.download_course = unavailable_download
         with self.assertRaisesRegex(ValueError, "未发现可用音频源"):
             PipelineRunner(download, Stage("transcription"), Stage("structure")).run("c")
+
+    def test_retry_can_return_results_for_only_unavailable_lessons(self):
+        download = Stage("download")
+
+        def unavailable_download(course_id, **kwargs):
+            result = Result("download", failed=1, processed=1)
+            result.items = [SimpleNamespace(status="source_unavailable")]
+            return result
+
+        download.download_course = unavailable_download
+        result = PipelineRunner(
+            download, Stage("transcription"), Stage("structure")
+        ).run("c", allow_all_unavailable=True)
+
+        self.assertEqual("partial", result.status)
 
 
 if __name__ == "__main__":

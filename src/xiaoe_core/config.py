@@ -63,6 +63,15 @@ class AppSettings:
         value = str(self.load().get("browser") or "chrome")
         return value if value in self.VALID_BROWSERS else "chrome"
 
+    def retry_timeout_seconds(self, default: int = 15) -> int:
+        pipeline = self.load().get("pipeline")
+        if not isinstance(pipeline, dict):
+            return default
+        try:
+            return max(0, int(pipeline.get("retry_timeout_seconds", default)))
+        except (TypeError, ValueError):
+            return default
+
     def save_browser(self, browser: str) -> None:
         if browser not in self.VALID_BROWSERS:
             raise ValueError("Unsupported browser backend: {}".format(browser))

@@ -338,6 +338,7 @@ class OpenAICompatibleStructurer:
     def structure(self, transcript: str, title: str, work_dir: Path) -> Dict[str, Any]:
         _require_transcript(transcript)
         _require_api_key(self.api_key, self.name)
+        work_dir.mkdir(parents=True, exist_ok=True)
         payload = {
             "model": self.model,
             "messages": [
@@ -368,19 +369,74 @@ class OpenAICompatibleStructurer:
                 # Alibaba rejects JSON mode on some thinking-enabled models.
                 # The schema remains in the prompt and output is validated locally.
                 payload.pop("response_format", None)
-        response = self.http.request(
-            _endpoint(self.base_url, "chat/completions"),
-            {"Authorization": "Bearer {}".format(self.api_key), "Content-Type": "application/json"},
-            payload,
-        )
-        try:
-            content = response["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as error:
+        endpoint = _endpoint(self.base_url, "chat/completions")
+        headers = {
+            "Authorization": "Bearer {}".format(self.api_key),
+            "Content-Type": "application/json",
+        }
+        last_content = ""
+        last_finish_reason = ""
+        for attempt in range(2):
+            request_payload = dict(payload)
+            request_payload["messages"] = list(payload["messages"])
+            if attempt:
+                request_payload["messages"].append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous response could not be parsed. Return exactly one complete "
+                            "JSON object matching the schema. Do not return Markdown fences or plain text."
+                        ),
+                    }
+                )
+            response = self.http.request(endpoint, headers, request_payload)
+            try:
+                choice = response["choices"][0]
+                content = choice["message"]["content"]
+                finish_reason = str(choice.get("finish_reason") or "")
+            except (KeyError, IndexError, TypeError) as error:
+                raise StructureError(
+                    "compatible_invalid_output",
+                    "{} returned no message content.".format(self.name),
+                ) from error
+            last_content = str(content or "")
+            last_finish_reason = finish_reason
+            try:
+                return _parse_json_value(
+                    content,
+                    "compatible_invalid_output",
+                    "{} returned invalid structured data.".format(self.name),
+                )
+            except StructureError:
+                _write_failed_structure_response(
+                    work_dir, self.name, attempt + 1, last_finish_reason, last_content
+                )
+
+        if last_finish_reason in {"length", "max_tokens"}:
             raise StructureError(
-                "compatible_invalid_output", "{} returned no message content.".format(self.name)
-            ) from error
-        return _parse_json_value(
-            content, "compatible_invalid_output", "{} returned invalid structured data.".format(self.name)
+                "compatible_output_truncated",
+                "{} output reached the token limit. Raw response: {}".format(
+                    self.name, work_dir / "structure-response.failed.json"
+                ),
+            )
+        if _looks_like_plain_text(last_content):
+            cleaned = _strip_markdown_fence(last_content)
+            return {
+                "title": title,
+                "summary": cleaned[:300],
+                "sections": [
+                    {
+                        "heading": "整理正文",
+                        "content": cleaned,
+                        "key_points": [],
+                    }
+                ],
+            }
+        raise StructureError(
+            "compatible_invalid_output",
+            "{} returned invalid structured data after retry. Raw response: {}".format(
+                self.name, work_dir / "structure-response.failed.json"
+            ),
         )
 
 
@@ -446,6 +502,44 @@ class AnthropicStructurer:
 def _endpoint(base_url: str, resource: str) -> str:
     suffix = "/" + resource.lstrip("/")
     return base_url if base_url.endswith(suffix) else base_url.rstrip("/") + suffix
+
+
+def _write_failed_structure_response(
+    work_dir: Path,
+    provider: str,
+    attempt: int,
+    finish_reason: str,
+    content: str,
+) -> None:
+    path = work_dir / "structure-response.failed.json"
+    payload = {
+        "provider": provider,
+        "attempt": attempt,
+        "finish_reason": finish_reason,
+        "content": content,
+    }
+    temporary = path.with_suffix(path.suffix + ".partial")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _strip_markdown_fence(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1]).strip()
+    return cleaned
+
+
+def _looks_like_plain_text(text: str) -> bool:
+    cleaned = _strip_markdown_fence(text)
+    if not cleaned or cleaned.startswith(("{", "[")):
+        return False
+    return len(cleaned) >= 20
 
 
 def _openai_output_text(response: Dict[str, Any]) -> Optional[str]:

@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from .config import AppPaths
+from .lesson_paths import lessons_by_date
 from .models import StructureBatchResult, StructureItemResult
+from .path_reports import write_stage_report
 from .progress import ProgressSpinner, finish_progress
 from .services import CourseService, LessonService
 from .structurer import StructureError, StructureProvider, render_markdown
@@ -17,18 +20,27 @@ class StructureService:
         lessons: LessonService,
         provider: StructureProvider,
         show_progress: bool = True,
+        paths: Optional[AppPaths] = None,
     ) -> None:
         self.courses = courses
         self.lessons = lessons
         self.provider = provider
         self.show_progress = show_progress
+        self.paths = paths
 
     def structure_course(
-        self, course_id: str, lesson_id: Optional[str] = None, limit: Optional[int] = None, force: bool = False
+        self,
+        course_id: str,
+        lesson_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        force: bool = False,
+        positions: Optional[set] = None,
     ) -> StructureBatchResult:
         if self.courses.get(course_id) is None:
             raise ValueError("Course does not exist: {}".format(course_id))
-        lessons = self.lessons.list_for_download(course_id, lesson_id, limit)
+        lessons = self.lessons.list_for_download(
+            course_id, lesson_id, limit, positions
+        )
         if lesson_id and not lessons:
             raise ValueError("Lesson does not exist in course: {}".format(lesson_id))
         items = []
@@ -57,8 +69,32 @@ class StructureService:
                         index, total, label, lesson.title[:40]
                     )
                 )
+                if item.error:
+                    print("      原因：{}".format(item.error))
         succeeded = sum(item.status == "completed" for item in items)
         skipped = sum(item.status == "skipped" for item in items)
+        if self.paths is not None:
+            report_lessons = lessons_by_date(
+                self.lessons.list_for_download(course_id)
+            )
+
+            def markdown_path(lesson_id: str) -> Optional[str]:
+                note = self.lessons.structured_note(lesson_id)
+                if note is None or note["status"] != "completed":
+                    return None
+                return str(note["markdown_file_path"])
+
+            report_path = write_stage_report(
+                self.paths.courses_dir,
+                course_id,
+                "structure",
+                (
+                    (lesson.position, lesson.title, markdown_path(lesson.id))
+                    for lesson in report_lessons
+                ),
+            )
+            if self.show_progress:
+                print("结构化 Markdown 清单：{}".format(report_path))
         return StructureBatchResult(
             course_id, len(items), succeeded, skipped, len(items) - succeeded - skipped, items
         )

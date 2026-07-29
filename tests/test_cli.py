@@ -168,6 +168,28 @@ class CliTest(unittest.TestCase):
         self.assertIn("语音转文字：处理 1，成功 1", output.getvalue())
         self.assertNotIn("{", output.getvalue())
 
+    def test_pipeline_text_output_lists_final_path_reports(self) -> None:
+        result = mock.Mock(status="completed", course_id="course_1")
+        result.to_dict.return_value = {
+            "download": {"processed": 0, "succeeded": 0, "skipped": 0, "failed": 0, "items": []},
+            "transcription": {"processed": 0, "succeeded": 0, "skipped": 0, "failed": 0, "items": []},
+            "structure": {"processed": 0, "succeeded": 0, "skipped": 0, "failed": 0, "items": []},
+        }
+        paths = AppPaths.resolve(self.temp_dir.name)
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            emit_pipeline_result(result, False, paths)
+
+        text = output.getvalue()
+        self.assertIn("audio-files.txt", text)
+        self.assertIn("transcript-files.txt", text)
+        self.assertIn("structure-files.txt", text)
+        self.assertIn("output-summary.txt", text)
+        self.assertTrue(
+            (paths.courses_dir / "course_1" / "output-summary.txt").is_file()
+        )
+
     def test_auth_check_defaults_to_dedicated_session_page(self) -> None:
         paths = AppPaths.resolve(self.temp_dir.name)
         service = CourseService(Database(paths.database_file))

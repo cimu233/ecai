@@ -211,6 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     structure_parser.add_argument("course_id")
     structure_parser.add_argument("--lesson", dest="lesson_id")
     structure_parser.add_argument("--limit", type=int)
+    structure_parser.add_argument("--positions", help="Lesson positions (same format as download)")
     structure_parser.add_argument("--provider", choices=_safe_structure_provider_choices())
     structure_parser.add_argument("--model")
     structure_parser.add_argument("--effort")
@@ -221,6 +222,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("course_id")
     run_parser.add_argument("--lesson", dest="lesson_id")
     run_parser.add_argument("--limit", type=int)
+    run_parser.add_argument("--positions", help="Lesson positions: all, 4, 12-15 or 4,12-15,20")
+    run_parser.add_argument(
+        "--retry-timeout",
+        type=int,
+        help="Seconds to wait before automatically retrying every failed lesson once",
+    )
     run_parser.add_argument("--language")
     run_parser.add_argument("--asr-provider", choices=_safe_provider_choices())
     run_parser.add_argument("--asr-model")
@@ -379,7 +386,7 @@ def emit_catalog(course_title: str, lessons: list, as_json: bool, course_id: str
         print("{:>3}. {}".format(lesson.position, lesson.title))
 
 
-def emit_pipeline_result(result: Any, as_json: bool) -> None:
+def emit_pipeline_result(result: Any, as_json: bool, paths: Optional[Any] = None) -> None:
     payload = result.to_dict()
     if as_json:
         emit(payload, True)
@@ -400,6 +407,31 @@ def emit_pipeline_result(result: Any, as_json: bool) -> None:
         for item in stage.get("items", []):
             if item.get("error"):
                 print("  失败：{} - {}".format(item.get("lesson_id") or "未知条目", item["error"]))
+    if paths is not None:
+        course_dir = paths.courses_dir / result.course_id
+        audio_report = course_dir / "audio-files.txt"
+        transcript_report = course_dir / "transcript-files.txt"
+        structure_report = course_dir / "structure-files.txt"
+        summary_path = course_dir / "output-summary.txt"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(
+            "\n".join(
+                [
+                    "课程 ID：{}".format(result.course_id),
+                    "音频文件：{}".format(audio_report),
+                    "转录文字：{}".format(transcript_report),
+                    "结构化 Markdown：{}".format(structure_report),
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        print()
+        print("全部输出路径：")
+        print("  音频文件：{}".format(audio_report))
+        print("  转录文字：{}".format(transcript_report))
+        print("  结构化 Markdown：{}".format(structure_report))
+        print("  汇总文件：{}".format(summary_path))
 
 
 def resolve_auth_check_url(service: CourseService, requested_url: Optional[str]) -> str:
@@ -510,6 +542,22 @@ def run(arguments: argparse.Namespace) -> int:
     paths = AppPaths.resolve(arguments.data_dir)
     paths.create()
     service = CourseService(Database(paths.database_file))
+    from xiaoe_core.lesson_paths import (
+        migrate_all_lesson_directories,
+        migrate_course_lesson_directories,
+        rebuild_course_path_reports,
+    )
+
+    path_lessons = LessonService(service.database)
+    known_course_ids = [course.id for course in service.list_courses()]
+    migrated = migrate_all_lesson_directories(
+        paths, path_lessons, known_course_ids
+    )
+    if migrated:
+        for course_id in known_course_ids:
+            rebuild_course_path_reports(paths, path_lessons, course_id)
+        if not getattr(arguments, "as_json", False):
+            print("已将 {} 个小节目录整理为按日期排列的课程名称。".format(len(migrated)))
 
     if arguments.command == "browser":
         settings = AppSettings(paths.settings_file)
@@ -860,6 +908,10 @@ def run(arguments: argparse.Namespace) -> int:
         lessons = LessonService(service.database)
         chrome = build_browser_manager(arguments, paths)
         discovered = XiaoeCatalogService(paths, service, lessons, chrome).refresh(arguments.course_id)
+        moved = migrate_course_lesson_directories(paths, lessons, arguments.course_id)
+        rebuild_course_path_reports(paths, lessons, arguments.course_id)
+        if moved and not arguments.as_json:
+            print("已更新 {} 个小节目录名称。".format(len(moved)))
         course = service.get(arguments.course_id)
         emit_catalog(course.title if course else arguments.course_id, discovered, arguments.as_json, arguments.course_id)
         return 0
@@ -895,7 +947,7 @@ def run(arguments: argparse.Namespace) -> int:
             lessons=lessons,
             resolver=HybridMediaResolver(XiaoeBrowserMediaResolver(build_browser_manager(arguments, paths))),
             selector=MediaSelector(),
-            downloader=AudioDownloader(),
+            downloader=AudioDownloader(show_progress=not arguments.as_json),
         )
         if not arguments.as_json:
             display_download_overview(
@@ -952,7 +1004,9 @@ def run(arguments: argparse.Namespace) -> int:
             display_lessons([lesson.to_dict() for lesson in all_lessons], sys.stdout)
 
         provider = build_asr_provider(arguments, paths, arguments.provider)
-        transcription = TranscriptionService(paths, service, lessons, provider)
+        transcription = TranscriptionService(
+            paths, service, lessons, provider, show_progress=not arguments.as_json
+        )
         result = transcription.transcribe_course(
             arguments.course_id,
             lesson_id=arguments.lesson_id,
@@ -1000,16 +1054,25 @@ def run(arguments: argparse.Namespace) -> int:
         return 0
 
     if arguments.command == "structure":
+        from xiaoe_core.services import parse_positions
+
         lessons = LessonService(service.database)
         structure_provider = build_selected_structure_provider(
             paths, arguments.provider, arguments.model, arguments.effort
         )
-        structuring = StructureService(service, lessons, structure_provider)
+        structuring = StructureService(
+            service,
+            lessons,
+            structure_provider,
+            show_progress=not arguments.as_json,
+            paths=paths,
+        )
         result = structuring.structure_course(
             arguments.course_id,
             lesson_id=arguments.lesson_id,
             limit=arguments.limit,
             force=arguments.force,
+            positions=parse_positions(arguments.positions) if arguments.positions else None,
         )
         if arguments.as_json:
             emit(result.to_dict(), True)
@@ -1025,41 +1088,69 @@ def run(arguments: argparse.Namespace) -> int:
         return 1 if result.failed else 0
 
     if arguments.command == "run":
+        from xiaoe_cli.retry_prompt import prompt_failed_retry
+        from xiaoe_core.services import parse_positions
+
         lessons = LessonService(service.database)
-        provider = build_asr_provider(arguments, paths, arguments.asr_provider)
-        structure_model = arguments.structure_model or arguments.codex_model
-        structure_provider = build_selected_structure_provider(
-            paths,
-            arguments.structure_provider,
-            structure_model,
-            arguments.structure_effort,
-        )
         chrome = build_browser_manager(arguments, paths)
         catalog = XiaoeCatalogService(paths, service, lessons, chrome)
-        downloads = DownloadService(
-            paths=paths,
-            courses=service,
-            lessons=lessons,
-            resolver=HybridMediaResolver(XiaoeBrowserMediaResolver(chrome)),
-            selector=MediaSelector(),
-            downloader=AudioDownloader(),
+        initial_positions = (
+            parse_positions(arguments.positions) if arguments.positions else None
         )
-        transcriptions = TranscriptionService(
-            paths,
-            service,
-            lessons,
-            provider,
-        )
-        structures = StructureService(service, lessons, structure_provider)
 
-        def execute_pipeline() -> Any:
-            catalog.refresh(arguments.course_id)
+        def execute_pipeline(
+            positions: Optional[set] = None,
+            refresh_catalog: bool = True,
+            allow_all_unavailable: bool = False,
+        ) -> Any:
+            if refresh_catalog:
+                catalog.refresh(arguments.course_id)
+                moved = migrate_course_lesson_directories(
+                    paths, lessons, arguments.course_id
+                )
+                rebuild_course_path_reports(paths, lessons, arguments.course_id)
+                if moved and not arguments.as_json:
+                    print("已更新 {} 个小节目录名称。".format(len(moved)))
+
+            provider = build_asr_provider(
+                arguments, paths, arguments.asr_provider
+            )
+            structure_model = arguments.structure_model or arguments.codex_model
+            structure_provider = build_selected_structure_provider(
+                paths,
+                arguments.structure_provider,
+                structure_model,
+                arguments.structure_effort,
+            )
+            downloads = DownloadService(
+                paths=paths,
+                courses=service,
+                lessons=lessons,
+                resolver=HybridMediaResolver(XiaoeBrowserMediaResolver(chrome)),
+                selector=MediaSelector(),
+                downloader=AudioDownloader(show_progress=not arguments.as_json),
+            )
+            transcriptions = TranscriptionService(
+                paths,
+                service,
+                lessons,
+                provider,
+                show_progress=not arguments.as_json,
+            )
+            structures = StructureService(
+                service,
+                lessons,
+                structure_provider,
+                show_progress=not arguments.as_json,
+                paths=paths,
+            )
             if not arguments.as_json:
                 display_download_overview(
                     downloads.download_overview(
                         arguments.course_id,
                         lesson_id=arguments.lesson_id,
                         limit=arguments.limit,
+                        positions=positions,
                     ),
                     sys.stdout,
                 )
@@ -1069,14 +1160,44 @@ def run(arguments: argparse.Namespace) -> int:
                 limit=arguments.limit,
                 force_transcription=arguments.force_transcription,
                 force_structure=arguments.force_structure,
+                positions=positions,
+                allow_all_unavailable=allow_all_unavailable,
             )
 
         result = run_with_ego_resume(
-            execute_pipeline,
+            lambda: execute_pipeline(initial_positions),
             chrome,
             interactive=not arguments.as_json and sys.stdin.isatty(),
         )
-        emit_pipeline_result(result, arguments.as_json)
+        interactive = not arguments.as_json and sys.stdin.isatty()
+        if result.status == "partial" and interactive:
+            retry_timeout = (
+                arguments.retry_timeout
+                if arguments.retry_timeout is not None
+                else AppSettings(paths.settings_file).retry_timeout_seconds()
+            )
+            retry_positions = prompt_failed_retry(
+                result,
+                [lesson.to_dict() for lesson in lessons.list_for_download(arguments.course_id)],
+                retry_timeout,
+                sys.stdout,
+            )
+            if retry_positions:
+                print(
+                    "\n重新执行失败项目：{}\n".format(
+                        ",".join(str(value) for value in sorted(retry_positions))
+                    )
+                )
+                result = run_with_ego_resume(
+                    lambda: execute_pipeline(
+                        retry_positions,
+                        refresh_catalog=False,
+                        allow_all_unavailable=True,
+                    ),
+                    chrome,
+                    interactive=True,
+                )
+        emit_pipeline_result(result, arguments.as_json, paths)
         return 0 if result.status == "completed" else 1
 
     raise RuntimeError("Unhandled command.")

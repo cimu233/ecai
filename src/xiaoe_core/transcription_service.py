@@ -9,6 +9,8 @@ from .asr import AsrError, AsrProvider, merge_chunk_results
 from .config import AppPaths
 from .downloader import ffmpeg_executable
 from .models import TranscriptionBatchResult, TranscriptionItemResult, TranscriptResult
+from .lesson_paths import lessons_by_date
+from .path_reports import write_stage_report
 from .progress import ProgressSpinner, finish_progress
 from .services import CourseService, LessonService
 
@@ -104,6 +106,27 @@ class TranscriptionService:
                 close()
         succeeded = sum(item.status == "transcript_ready" for item in items)
         skipped = sum(item.status == "skipped" for item in items)
+        report_lessons = lessons_by_date(
+            self.lessons.list_for_download(course_id)
+        )
+
+        def transcript_path(lesson_id: str) -> Optional[str]:
+            transcript = self.lessons.transcript(lesson_id)
+            if transcript is None or transcript["status"] != "transcript_ready":
+                return None
+            return str(Path(transcript["raw_file_path"]).with_name("transcript.txt"))
+
+        report_path = write_stage_report(
+            self.paths.courses_dir,
+            course_id,
+            "transcript",
+            (
+                (lesson.position, lesson.title, transcript_path(lesson.id))
+                for lesson in report_lessons
+            ),
+        )
+        if self.show_progress:
+            print("转录文字清单：{}".format(report_path))
         return TranscriptionBatchResult(
             course_id=course_id,
             processed=len(items),

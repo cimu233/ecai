@@ -4,15 +4,7 @@ project_dir="${0:A:h}"
 python_bin="/usr/bin/python3"
 
 run_xiaoe() {
-  "$python_bin" - "$project_dir" "$@" <<'PY'
-import sys
-
-project_dir = sys.argv[1]
-sys.path.insert(0, project_dir + "/src")
-from xiaoe_cli.main import main
-
-raise SystemExit(main(sys.argv[2:]))
-PY
+  "$python_bin" -c 'import sys; sys.path.insert(0, sys.argv[1] + "/src"); from xiaoe_cli.main import main; raise SystemExit(main(sys.argv[2:]))' "$project_dir" "$@"
 }
 
 select_course() {
@@ -113,8 +105,8 @@ while true; do
  9. 下载课程音频
 10. 转写课程音频
 11. 转写本地音频文件
-12. 试跑一节课（下载+转写+整理）
-13. 运行整门课程（下载+转写+整理）
+12. 试跑一节课（下载+转写+整理，失败可重试）
+13. 运行整门课程（下载+转写+整理，失败可重试）
 
 —— 工具 ——
 14. 查看任务状态
@@ -268,14 +260,26 @@ MENU
     12)
       course_id="$(select_course)"
       if [[ -n "$course_id" ]]; then
-        run_xiaoe run "$course_id" --limit 1 --language zh
+        printf "失败后等待多少秒自动重试？（回车默认 15）："
+        read -r retry_timeout
+        if [[ "$retry_timeout" == <-> ]]; then
+          run_xiaoe run "$course_id" --limit 1 --language zh --retry-timeout "$retry_timeout"
+        else
+          run_xiaoe run "$course_id" --limit 1 --language zh
+        fi
       fi
       pause_screen
       ;;
     13)
       course_id="$(select_course)"
       if [[ -n "$course_id" ]]; then
-        run_xiaoe run "$course_id" --language zh
+        printf "失败后等待多少秒自动重试？（回车默认 15）："
+        read -r retry_timeout
+        if [[ "$retry_timeout" == <-> ]]; then
+          run_xiaoe run "$course_id" --language zh --retry-timeout "$retry_timeout"
+        else
+          run_xiaoe run "$course_id" --language zh
+        fi
       fi
       pause_screen
       ;;

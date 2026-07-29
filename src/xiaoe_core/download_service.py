@@ -1,8 +1,6 @@
 """Lesson download orchestration and persistent state transitions."""
 
-import hashlib
 import json
-import re
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -12,7 +10,9 @@ from .browser import BrowserError
 from .config import AppPaths
 from .downloader import AudioDownloader, write_download_metadata
 from .media import DownloadError, DownloadRequest, MediaResolver, MediaSelector, MediaSource
+from .lesson_paths import lesson_directory_names, lessons_by_date
 from .models import DownloadBatchResult, DownloadItemResult, Lesson
+from .path_reports import write_stage_report
 from .progress import ProgressSpinner, finish_progress
 from .services import CourseService, LessonService
 from .source_cache import MediaSourceCache
@@ -36,6 +36,7 @@ class DownloadService:
         self.downloader = downloader
         self.source_cache = MediaSourceCache()
         self._resolver_lock = threading.Lock()
+        self._directory_names = {}
 
     def download_course(
         self,
@@ -136,6 +137,25 @@ class DownloadService:
         succeeded = sum(item.status == "audio_ready" for item in items)
         skipped = sum(item.status in {"skipped", "no_media"} for item in items)
         failed = len(items) - succeeded - skipped
+        report_lessons = lessons_by_date(
+            self.lessons.list_for_download(course_id)
+        )
+
+        def audio_path(lesson: Lesson) -> Optional[str]:
+            artifact = self._existing_artifact(lesson)
+            return str(artifact["file_path"]) if artifact is not None else None
+
+        report_path = write_stage_report(
+            self.paths.courses_dir,
+            course_id,
+            "audio",
+            (
+                (lesson.position, lesson.title, audio_path(lesson))
+                for lesson in report_lessons
+            ),
+        )
+        if self.downloader.show_progress:
+            print("音频文件清单：{}".format(report_path))
         return DownloadBatchResult(
             course_id=course_id,
             processed=len(items),
@@ -309,16 +329,6 @@ class DownloadService:
         return existing if existing is not None and self._artifact_is_valid(existing) else None
 
     @staticmethod
-    def _safe_component(value: str) -> str:
-        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
-        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
-        if cleaned == value and cleaned and len(cleaned) <= 100:
-            return cleaned
-        if cleaned:
-            return "{}_{}".format(cleaned[:80], digest)
-        return "item_{}".format(digest)
-
-    @staticmethod
     def _artifact_is_valid(row: object) -> bool:
         path = Path(row["file_path"])
         return (
@@ -328,12 +338,14 @@ class DownloadService:
         )
 
     def _lesson_output_dir(self, lesson: Lesson) -> Path:
-        return (
-            self.paths.courses_dir
-            / self._safe_component(lesson.course_id)
-            / "lessons"
-            / self._safe_component(lesson.id)
-        )
+        if lesson.course_id not in self._directory_names:
+            self._directory_names[lesson.course_id] = lesson_directory_names(
+                self.lessons.list_for_download(lesson.course_id)
+            )
+        name = self._directory_names[lesson.course_id].get(lesson.id)
+        if not name:
+            name = lesson_directory_names([lesson])[lesson.id]
+        return self.paths.courses_dir / lesson.course_id / "lessons" / name
 
     def _source_cache_path(self, lesson: Lesson) -> Path:
         return self._lesson_output_dir(lesson) / "media-source.json"

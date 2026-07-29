@@ -236,6 +236,55 @@ class StructureServiceTest(unittest.TestCase):
             "medium", anthropic_http.payload["output_config"]["effort"]
         )
 
+    def test_openai_compatible_retries_invalid_json_and_saves_response(self):
+        output = {
+            "title": "Lesson",
+            "summary": "Summary",
+            "sections": [{"heading": "Part", "content": "Body", "key_points": []}],
+        }
+
+        class RetryHttp:
+            def __init__(self):
+                self.calls = 0
+
+            def request(self, url, headers, payload, timeout=300.0):
+                self.calls += 1
+                if self.calls == 1:
+                    return {
+                        "choices": [
+                            {
+                                "message": {"content": "plain text from the first attempt"},
+                                "finish_reason": "stop",
+                            }
+                        ]
+                    }
+                return {
+                    "choices": [
+                        {
+                            "message": {"content": json.dumps(output)},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                }
+
+        work_dir = Path(self.temp_dir.name) / "retry"
+        http = RetryHttp()
+        provider = OpenAICompatibleStructurer(
+            "deepseek_api",
+            "secret",
+            "deepseek-chat",
+            "https://api.deepseek.com/v1",
+            http=http,
+        )
+
+        self.assertEqual("Lesson", provider.structure("Body", "Lesson", work_dir)["title"])
+        self.assertEqual(2, http.calls)
+        failed = json.loads(
+            (work_dir / "structure-response.failed.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(1, failed["attempt"])
+        self.assertIn("plain text", failed["content"])
+
     def test_markdown_renderer_is_deterministic(self):
         markdown = render_markdown({
             "title": "T",

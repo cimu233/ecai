@@ -1,7 +1,7 @@
 """End-to-end pipeline orchestration."""
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 from .download_service import DownloadService
 from .structure_service import StructureService
@@ -38,8 +38,12 @@ class PipelineRunner:
         limit: Optional[int] = None,
         force_transcription: bool = False,
         force_structure: bool = False,
+        positions: Optional[Set[int]] = None,
+        allow_all_unavailable: bool = False,
     ) -> PipelineRunResult:
-        download = self.downloads.download_course(course_id, lesson_id=lesson_id, limit=limit)
+        download = self.downloads.download_course(
+            course_id, lesson_id=lesson_id, limit=limit, positions=positions
+        )
         if download.processed == 0:
             raise ValueError("该课程尚未扫描内容目录，请先执行「扫描课程目录」。")
         unavailable_statuses = {"source_unavailable", "unsupported_drm", "no_media"}
@@ -48,13 +52,22 @@ class PipelineRunner:
             download.succeeded == 0
             and download_items
             and all(item.status in unavailable_statuses for item in download_items)
+            and not allow_all_unavailable
         ):
             raise ValueError("该课程所有课时都未发现可用音频源。")
         transcription = self.transcriptions.transcribe_course(
-            course_id, lesson_id=lesson_id, limit=limit, force=force_transcription
+            course_id,
+            lesson_id=lesson_id,
+            limit=limit,
+            force=force_transcription,
+            positions=positions,
         )
         structure = self.structures.structure_course(
-            course_id, lesson_id=lesson_id, limit=limit, force=force_structure
+            course_id,
+            lesson_id=lesson_id,
+            limit=limit,
+            force=force_structure,
+            positions=positions,
         )
         status = "completed" if not (download.failed or transcription.failed or structure.failed) else "partial"
         return PipelineRunResult(
