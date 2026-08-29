@@ -185,7 +185,13 @@ def _safe_human_component(value: str) -> str:
         for character in value
         if unicodedata.category(character) not in {"Cc", "Cs"}
     )
-    cleaned = cleaned.replace("/", "／").replace(":", "：")
+    # Windows rejects \ / : * ? " < > | in a path component; macOS only rejects
+    # the separator. Map each to its fullwidth twin so the name stays readable.
+    for illegal, replacement in (
+        ("/", "／"), ("\\", "＼"), (":", "："), ("*", "＊"),
+        ("?", "？"), ('"', "＂"), ("<", "＜"), (">", "＞"), ("|", "｜"),
+    ):
+        cleaned = cleaned.replace(illegal, replacement)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
     return (cleaned[:156].rstrip(" .") or "未命名课程")
 
