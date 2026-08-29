@@ -8,11 +8,42 @@ from typing import List, Optional
 from .asr import AsrError, AsrProvider, merge_chunk_results
 from .config import AppPaths
 from .downloader import ffmpeg_executable
-from .models import TranscriptionBatchResult, TranscriptionItemResult, TranscriptResult
+from .models import (
+    TranscriptionBatchResult,
+    TranscriptionItemResult,
+    TranscriptResult,
+    TranscriptSegment,
+)
 from .lesson_paths import lessons_by_date
 from .path_reports import write_stage_report
 from .progress import ProgressSpinner, finish_progress
 from .services import CourseService, LessonService
+
+
+
+def _load_chunk_cache(path: Path) -> Optional[TranscriptResult]:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return TranscriptResult(
+            text=payload["text"],
+            segments=[TranscriptSegment(**segment) for segment in payload["segments"]],
+            provider=payload["provider"],
+            model=payload["model"],
+            raw=payload.get("raw") or {},
+        )
+    except Exception:
+        return None
+
+
+def _save_chunk_cache(path: Path, result: TranscriptResult) -> None:
+    try:
+        payload = result.to_dict()
+        payload["raw"] = result.raw
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
 
 
 class AudioChunker:
@@ -42,6 +73,27 @@ class AudioChunker:
         if not chunks:
             raise AsrError("audio_chunk_failed", "ffmpeg produced no transcription chunks.")
         return chunks
+
+
+    def split_in_half(self, chunk: Path, depth: int) -> List[Path]:
+        """Cut one prepared chunk into two, for the stalled-chunk fallback."""
+        seconds = float(self.chunk_seconds) / (2 ** depth)
+        half = seconds / 2.0
+        outputs = []
+        for index, start in enumerate((0.0, half)):
+            target = chunk.with_name(
+                "{}_h{}{}".format(chunk.stem, index, chunk.suffix)
+            )
+            command = [
+                self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-ss", "{:.3f}".format(start), "-t", "{:.3f}".format(half),
+                "-i", str(chunk), "-ac", "1", "-ar", "16000",
+            ] + (["-c:a", "pcm_s16le"] if self.output_format == "wav" else ["-b:a", "64k"]) + [str(target)]
+            if subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode != 0:
+                return []
+            if target.stat().st_size >= 4096:
+                outputs.append(target)
+        return outputs
 
 
 class TranscriptionService:
@@ -136,6 +188,28 @@ class TranscriptionService:
             items=items,
         )
 
+    def _transcribe_chunk(self, chunk: Path, depth: int = 0) -> TranscriptResult:
+        """Transcribe one chunk, halving it if the provider stalls.
+
+        A stretch of pure music - an intro playing while the host waits for
+        an audience - can make the model hang until the request times out,
+        even though the same audio succeeds once split. Halving recovers the
+        content instead of losing the whole lesson to one bad chunk.
+        """
+        try:
+            return self.provider.transcribe(chunk)
+        except AsrError as error:
+            if error.code != "provider_network_error" or depth >= 2:
+                raise
+        halves = self.chunker.split_in_half(chunk, depth)
+        if not halves:
+            raise AsrError(
+                "provider_network_error", "ASR provider network request failed.", True
+            )
+        parts = [self._transcribe_chunk(half, depth + 1) for half in halves]
+        seconds = float(self.chunker.chunk_seconds) / (2 ** (depth + 1))
+        return merge_chunk_results(parts, [index * seconds for index in range(len(parts))])
+
     def _transcribe_lesson(
         self,
         lesson_id: str,
@@ -178,7 +252,18 @@ class TranscriptionService:
                     ),
                     enabled=None if self.show_progress else False,
                 ):
-                    results.append(self.provider.transcribe(chunk))
+                    # Cache each chunk beside its audio. A long lesson is
+                    # dozens of sequential calls; without this a single
+                    # network blip discards every chunk already paid for and
+                    # the retry starts from zero.
+                    cache = chunk.with_suffix(".result.json")
+                    cached = _load_chunk_cache(cache)
+                    if cached is not None:
+                        results.append(cached)
+                    else:
+                        outcome = self._transcribe_chunk(chunk)
+                        _save_chunk_cache(cache, outcome)
+                        results.append(outcome)
             offsets = [index * float(self.chunker.chunk_seconds) for index in range(len(chunks))]
             result = merge_chunk_results(results, offsets)
             raw_path = lesson_dir / "transcript.raw.json"
