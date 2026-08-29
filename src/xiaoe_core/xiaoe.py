@@ -24,12 +24,12 @@ MEDIA_PATTERN = re.compile(r"\.m3u8(?:$|\?)|\.(?:mp3|m4a|aac|flac|ogg|wav|mp4|we
 # getPlayUrl / get_lookback_list APIs already carry the signed source
 # URLs, so record them and feed the result through _synthetic_media_events
 # the same way the Ego browser path does.
-PLAY_URL_RECORDER = """
+PLAY_URL_RECORDER = r"""
 window.__xePlay = [];
 (function () {
   const keep = (url, text) => {
     try {
-      if (/getPlayUrl|get_lookback_list/i.test(String(url))) { window.__xePlay.push(String(text)); }
+      if (/getPlayUrl|get_lookback_list|audio\.info\.get/i.test(String(url))) { window.__xePlay.push(String(text)); }
     } catch (e) {}
   };
   const originalFetch = window.fetch;
@@ -37,7 +37,7 @@ window.__xePlay = [];
     const response = await originalFetch.apply(this, args);
     try {
       const url = (args[0] && args[0].url) || args[0];
-      if (/getPlayUrl|get_lookback_list/i.test(String(url))) { keep(url, await response.clone().text()); }
+      if (/getPlayUrl|get_lookback_list|audio\.info\.get/i.test(String(url))) { keep(url, await response.clone().text()); }
     } catch (e) {}
     return response;
   };
@@ -667,6 +667,12 @@ class XiaoeBrowserMediaResolver:
                 continue
             if not isinstance(data, (dict, list)):
                 continue
+            if isinstance(data, dict):
+                # audio.info.get: data.audio_info.audio_url is a direct mp3
+                info = data.get("audio_info")
+                if isinstance(info, dict) and info.get("audio_url"):
+                    preferred.append(str(info["audio_url"]))
+                    continue
             if isinstance(data, list):
                 # get_lookback_list: data[].line_sharpness[].url
                 for line in data:
