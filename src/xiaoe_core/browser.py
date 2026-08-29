@@ -169,8 +169,10 @@ class ChromiumManager:
         self.mode_file = profile_dir / "{}.mode".format(browser_name)
 
     def ensure_running(self, visible: bool = False, initial_url: str = "about:blank") -> str:
-        # Automation must never steal the user's foreground application.
-        visible = False
+        # Automation must never steal the user's foreground application, so
+        # visible stays opt-in: only an explicit interactive login asks for it.
+        # Without a window there is no way to complete a QR-code or SMS login
+        # on platforms that have no Ego browser to inherit a session from.
         endpoint = self.debug_endpoint()
         if endpoint:
             current_mode = self.mode_file.read_text(encoding="ascii").strip() if self.mode_file.is_file() else "unknown"
@@ -267,7 +269,7 @@ class ChromiumManager:
 
     @staticmethod
     def requested_mode(visible: bool) -> str:
-        return "headless"
+        return "visible" if visible else "headless"
 
     def cookies(self, endpoint: str) -> List[Dict[str, Any]]:
         version = self._json(endpoint + "/json/version")

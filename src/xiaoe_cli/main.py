@@ -246,6 +246,11 @@ def build_parser() -> argparse.ArgumentParser:
     auth_commands = auth_parser.add_subparsers(dest="auth_command", required=True)
     auth_start = auth_commands.add_parser("start", help="Open the selected browser for Xiaoe login")
     auth_start.add_argument("--url", default="https://study.xiaoe-tech.com")
+    auth_start.add_argument(
+        "--visible",
+        action="store_true",
+        help="Open a real browser window so QR-code or SMS login can be completed",
+    )
     auth_start.add_argument("--json", action="store_true", dest="as_json")
     auth_login = auth_commands.add_parser("login", help="Log the selected browser in with saved credentials")
     auth_login.add_argument("--json", action="store_true", dest="as_json")
@@ -1017,7 +1022,9 @@ def run(arguments: argparse.Namespace) -> int:
             return 0
         chrome = build_browser_manager(arguments, paths)
         if arguments.auth_command == "start":
-            endpoint = chrome.ensure_running(visible=False, initial_url=arguments.url)
+            endpoint = chrome.ensure_running(
+                visible=arguments.visible, initial_url=arguments.url
+            )
             emit_auth(
                 {"status": "running", "browser": chrome.browser_name, "mode": "background", "endpoint": endpoint},
                 arguments.as_json,
