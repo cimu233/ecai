@@ -417,7 +417,9 @@ class AudioDownloader:
             "warning",
             "-stats",
             "-protocol_whitelist",
-            "file,http,https,tcp,tls,crypto",
+            # httpproxy is required when http_proxy/https_proxy are set in the
+            # environment; without it ffmpeg refuses to open the proxied stream.
+            "file,http,https,tcp,tls,crypto,httpproxy",
             "-allowed_extensions",
             "ALL",
             "-reconnect",

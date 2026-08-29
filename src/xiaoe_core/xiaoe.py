@@ -18,6 +18,41 @@ from .services import CourseService, LessonService, utc_now
 
 
 MEDIA_PATTERN = re.compile(r"\.m3u8(?:$|\?)|\.(?:mp3|m4a|aac|flac|ogg|wav|mp4|webm)(?:$|\?)", re.I)
+
+# A headless player never issues a real media request without a user
+# gesture, so the response sniffer in _media_urls sees nothing. The
+# getPlayUrl / get_lookback_list APIs already carry the signed source
+# URLs, so record them and feed the result through _synthetic_media_events
+# the same way the Ego browser path does.
+PLAY_URL_RECORDER = r"""
+window.__xePlay = [];
+(function () {
+  const keep = (url, text) => {
+    try {
+      if (/getPlayUrl|get_lookback_list|audio\.info\.get/i.test(String(url))) { window.__xePlay.push(String(text)); }
+    } catch (e) {}
+  };
+  const originalFetch = window.fetch;
+  window.fetch = async function (...args) {
+    const response = await originalFetch.apply(this, args);
+    try {
+      const url = (args[0] && args[0].url) || args[0];
+      if (/getPlayUrl|get_lookback_list|audio\.info\.get/i.test(String(url))) { keep(url, await response.clone().text()); }
+    } catch (e) {}
+    return response;
+  };
+  const open_ = XMLHttpRequest.prototype.open;
+  const send_ = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    this.__xeUrl = url;
+    return open_.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function () {
+    this.addEventListener('load', () => keep(this.__xeUrl, this.responseText));
+    return send_.apply(this, arguments);
+  };
+})();
+"""
 ACCOUNT_COURSE_TYPES = {5, 6, 8, 25, 50}
 
 
@@ -513,10 +548,19 @@ class XiaoeBrowserMediaResolver:
             cookies = captured["cookies"]
         else:
             endpoint = self.chrome.ensure_running(visible=False)
-            page = self.chrome.open_page(endpoint, lesson.source_url)
+            page = self.chrome.open_page(endpoint, "about:blank")
             try:
+                page.command("Page.enable")
+                page.command(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {"source": PLAY_URL_RECORDER},
+                )
+                page.command("Page.navigate", {"url": lesson.source_url})
                 state = inspect_page(page, 3.0, preserve_events=True)
                 events = self._trigger_playback(page, wait)
+                events.extend(
+                    self._synthetic_media_events(self._recorded_play_urls(page))
+                )
             finally:
                 page.close()
             cookies = self.chrome.cookies(endpoint)
@@ -600,6 +644,58 @@ class XiaoeBrowserMediaResolver:
         return urls
 
     @staticmethod
+    def _recorded_play_urls(page: Any) -> List[str]:
+        """Pull signed source URLs out of the recorded play/lookback responses.
+
+        Audio-only mp3 is preferred: it needs no HLS assembly and, unlike the
+        720p variant, is not served from the DRM path.
+        """
+        try:
+            evaluated = page.command(
+                "Runtime.evaluate",
+                {"expression": "JSON.stringify(window.__xePlay || [])", "returnByValue": True},
+            )
+            payloads = json.loads((evaluated.get("result") or {}).get("value") or "[]")
+        except Exception:
+            return []
+        preferred: List[str] = []
+        fallback: List[str] = []
+        for payload in payloads:
+            try:
+                data = json.loads(payload).get("data")
+            except Exception:
+                continue
+            if not isinstance(data, (dict, list)):
+                continue
+            if isinstance(data, dict):
+                # audio.info.get: data.audio_info.audio_url is a direct mp3
+                info = data.get("audio_info")
+                if isinstance(info, dict) and info.get("audio_url"):
+                    preferred.append(str(info["audio_url"]))
+                    continue
+            if isinstance(data, list):
+                # get_lookback_list: data[].line_sharpness[].url
+                for line in data:
+                    if not isinstance(line, dict):
+                        continue
+                    for variant in line.get("line_sharpness") or []:
+                        if isinstance(variant, dict) and variant.get("url"):
+                            fallback.append(str(variant["url"]))
+                continue
+            for entry in data.values():
+                play_list = entry.get("play_list") if isinstance(entry, dict) else None
+                if not isinstance(play_list, dict):
+                    continue
+                for name, variant in play_list.items():
+                    if not isinstance(variant, dict) or not variant.get("is_support"):
+                        continue
+                    url = str(variant.get("play_url") or "")
+                    if not url:
+                        continue
+                    (preferred if str(name).lower() == "mp3" else fallback).append(url)
+        return preferred or fallback
+
+    @staticmethod
     def _synthetic_media_events(urls: Iterable[str]) -> List[Dict[str, Any]]:
         return [
             {
@@ -670,6 +766,10 @@ class XiaoeBrowserMediaResolver:
             mime = str(response.get("mimeType", "")).lower()
             if MEDIA_PATTERN.search(url) or "mpegurl" in mime or mime.startswith("audio/"):
                 parsed = urlparse(url)
+                # A finished live lesson still advertises its push-stream URL,
+                # which 404s. Its replay lives behind get_lookback_list instead.
+                if (parsed.hostname or "").startswith("liveplay"):
+                    continue
                 key = (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path)
                 if key in urls:
                     del urls[key]
