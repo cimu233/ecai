@@ -277,7 +277,13 @@ class DownloadService:
                 self.lessons.set_status(lesson.id, "pending_source")
                 raise
             except Exception as error:
-                message = "Unexpected download failure: {}".format(type(error).__name__)
+                # Keep the real cause: the bare type name hides which path or
+                # value was missing, which is usually the whole diagnosis.
+                import traceback as _tb
+                frame = " | ".join(_tb.format_tb(error.__traceback__)[-1:]).strip()
+                message = "Unexpected download failure: {}: {} @ {}".format(
+                    type(error).__name__, error, frame
+                )[:600]
                 self.lessons.set_failure(lesson.id, "download_failed", "unexpected_error", message)
                 return DownloadItemResult(
                     lesson_id=lesson.id,
