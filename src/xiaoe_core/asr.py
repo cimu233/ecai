@@ -34,6 +34,21 @@ class AsrProvider(Protocol):
         ...
 
 
+# DashScope briefly answers 400/403 with "not eligible" or "account in good
+# standing" around the free-quota-to-billed transition, and again while a newly
+# enabled model propagates. Both recover on their own, so treat them as
+# transient rather than losing the whole lesson to a retryable condition.
+TRANSIENT_MARKERS = ("good standing", "eligible", "access denied", "access to model denied")
+
+
+def _is_transient(code: int, detail: str) -> bool:
+    if code == 429 or code >= 500:
+        return True
+    if code in (400, 403):
+        return any(m in detail.lower() for m in TRANSIENT_MARKERS)
+    return False
+
+
 class JsonHttpClient:
     def request(
         self,
@@ -53,7 +68,7 @@ class JsonHttpClient:
             raise AsrError(
                 "provider_http_error",
                 "ASR provider returned HTTP {}: {}".format(error.code, detail),
-                retryable=error.code == 429 or error.code >= 500,
+                retryable=_is_transient(error.code, detail),
             ) from error
         except (URLError, TimeoutError) as error:
             raise AsrError("provider_network_error", "ASR provider network request failed.", True) from error
@@ -88,7 +103,7 @@ class BinaryJsonHttpClient:
                 with urlopen(request, timeout=timeout) as response:
                     return json.loads(response.read().decode("utf-8"))
             except HTTPError as error:
-                retryable = error.code == 429 or error.code >= 500
+                retryable = _is_transient(error.code, self._safe_error(error))
                 if retryable and attempt < self.max_attempts:
                     error.close()
                     self.sleep(float(2 ** (attempt - 1)))
@@ -395,7 +410,7 @@ class AlibabaQwenAsrProvider:
         language: Optional[str] = None,
         enable_itn: bool = True,
         http: Optional[JsonHttpClient] = None,
-        max_attempts: int = 3,
+        max_attempts: int = 6,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.api_key = (

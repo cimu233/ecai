@@ -13,6 +13,7 @@ from xiaoe_core.structurer import (
     DEFAULT_PROMPT_TEMPLATE,
     OpenAICompatibleStructurer,
     OpenAIResponsesStructurer,
+    StructureError,
     build_structure_prompt,
     render_markdown,
 )
@@ -146,6 +147,47 @@ class StructureServiceTest(unittest.TestCase):
             executable="claude", effort="medium", runner=runner
         )
         data = provider.structure("Body", "Lesson", Path(self.temp_dir.name) / "claude")
+        self.assertEqual("Lesson", data["title"])
+
+    def test_claude_code_failure_keeps_the_reason_the_cli_reported(self):
+        def runner(command, **kwargs):
+            class Result:
+                returncode = 1
+                stdout = json.dumps(
+                    {"is_error": True, "result": "You've hit your session limit"}
+                )
+                stderr = ""
+
+            return Result()
+
+        provider = ClaudeCodeStructurer(executable="claude", runner=runner)
+        with self.assertRaises(StructureError) as caught:
+            provider.structure("Body", "Lesson", Path(self.temp_dir.name) / "limit")
+        self.assertEqual("claude_code_failed", caught.exception.code)
+        self.assertIn("session limit", str(caught.exception))
+
+    def test_claude_code_output_survives_interleaved_diagnostics(self):
+        output = {
+            "title": "Lesson",
+            "summary": "Summary",
+            "sections": [{"heading": "Part", "content": "Body", "key_points": []}],
+        }
+
+        def runner(command, **kwargs):
+            class Result:
+                returncode = 0
+                stdout = "\n".join(
+                    [
+                        "Client.listTools() called but server advertises no tools",
+                        json.dumps({"structured_output": output}),
+                    ]
+                )
+                stderr = ""
+
+            return Result()
+
+        provider = ClaudeCodeStructurer(executable="claude", runner=runner)
+        data = provider.structure("Body", "Lesson", Path(self.temp_dir.name) / "noise")
         self.assertEqual("Lesson", data["title"])
 
     def test_openai_responses_disables_storage_and_uses_strict_schema(self):

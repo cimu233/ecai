@@ -223,13 +223,45 @@ class ClaudeCodeStructurer:
             text=True,
         )
         if process.returncode != 0:
-            raise StructureError("claude_code_failed", "Claude Code could not structure this transcript.")
-        try:
-            wrapper = json.loads(process.stdout)
-        except json.JSONDecodeError as error:
+            # Upstream discarded stderr and the CLI's own JSON error, which made
+            # every failure look identical in the database. Surface both.
+            detail = (process.stderr or "").strip()
+            if not detail:
+                # The CLI interleaves non-JSON diagnostics with its JSON result,
+                # so parse line by line instead of loading the whole stream.
+                for line in (process.stdout or "").splitlines():
+                    line = line.strip()
+                    if not line.startswith("{"):
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except Exception:
+                        continue
+                    detail = str(payload.get("result") or payload.get("terminal_reason") or "")
+                    if detail:
+                        break
+                else:
+                    detail = (process.stdout or "").strip()
+            raise StructureError(
+                "claude_code_failed",
+                "Claude Code exited {}: {}".format(process.returncode, detail[:400] or "no output"),
+            )
+        wrapper = None
+        for line in (process.stdout or "").splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue  # the CLI may interleave plain-text diagnostics
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                wrapper = candidate
+                break
+        if wrapper is None:
             raise StructureError(
                 "claude_code_invalid_output", "Claude Code returned invalid JSON."
-            ) from error
+            )
         value = wrapper.get("structured_output", wrapper.get("result", wrapper))
         return _parse_json_value(
             value, "claude_code_invalid_output", "Claude Code returned invalid structured data."
